@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
   <title>Loom Life Manager | Goals, Habits, Tasks &amp; AI Planning</title>
   <meta name="description" content="Loom is an iPhone life management app that helps you turn chaos into clarity by connecting purpose, goals, action plans, habits, reflection, and AI guidance.">
   <meta name="robots" content="index, follow, max-image-preview:large">
@@ -12,7 +13,7 @@
   <meta property="og:title" content="Loom Life Manager | Goals, Habits, Tasks &amp; AI Planning">
   <meta property="og:description" content="Loom turns chaos into clarity by connecting purpose, goals, action plans, habits, reflection, and AI guidance in one iPhone life management app.">
   <meta property="og:url" content="https://loomlife.us/">
-  <meta property="og:updated_time" content="2026-07-21T12:00:00-04:00">
+  <meta property="og:updated_time" content="2026-07-22T12:00:00-04:00">
   <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:url" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:secure_url" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
@@ -2201,6 +2202,777 @@
         width: min(82vw, 280px);
       }
     }
+
+    /* Homepage experience refresh */
+    :root {
+      --bg: #f5f5f7;
+      --paper: #ffffff;
+      --surface: #ffffff;
+      --surface-strong: #ffffff;
+      --ink: #1d1d1f;
+      --muted: #6e6e73;
+      --line: rgba(29, 29, 31, 0.08);
+      --max: 1120px;
+      --radius-xl: 36px;
+      --radius-lg: 28px;
+    }
+
+    .visually-hidden {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+
+    body {
+      background: var(--bg);
+    }
+
+    body .site-header {
+      border-bottom-color: rgba(29, 29, 31, 0.07);
+      background: rgba(255, 255, 255, 0.86);
+    }
+
+    .hero {
+      min-height: min(840px, calc(100svh - 68px));
+      border-bottom: 0;
+      background: #ffffff;
+    }
+
+    .hero::before {
+      background:
+        linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.98) 43%, rgba(255, 255, 255, 0.62) 66%, rgba(255, 255, 255, 0.12) 100%),
+        radial-gradient(circle at 82% 42%, rgba(0, 122, 255, 0.13), transparent 38%),
+        url("assets/landing/loom-hero-phone.png") right -18px center / min(56vw, 680px) auto no-repeat;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      top: 12%;
+      right: 4%;
+      z-index: -1;
+      width: min(34vw, 430px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(90, 92, 255, 0.08);
+      filter: blur(72px);
+      pointer-events: none;
+    }
+
+    .hero-content {
+      width: min(100%, 620px);
+      padding: clamp(54px, 7vh, 76px) 0;
+    }
+
+    .hero-kicker {
+      margin-bottom: 20px;
+      font-size: clamp(3.6rem, 8vw, 7rem);
+      font-weight: 780;
+      letter-spacing: -0.065em;
+      line-height: 0.94;
+    }
+
+    .hero .lead {
+      max-width: 51ch;
+      margin-bottom: 8px;
+      color: #515154;
+      line-height: 1.48;
+    }
+
+    .hero .seo-lead {
+      max-width: 58ch;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+
+    .hero-actions {
+      margin-top: 24px;
+    }
+
+    .hero-button-row {
+      gap: 14px;
+    }
+
+    .app-store-badge {
+      width: 166px;
+    }
+
+    h2 {
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+    }
+
+    h3 {
+      letter-spacing: -0.018em;
+    }
+
+    main > section {
+      position: relative;
+      padding: clamp(54px, 7vh, 76px) 0;
+    }
+
+    #system,
+    #features,
+    #research,
+    #compare {
+      background: #f5f5f7;
+    }
+
+    #screenshots,
+    #integrations,
+    #pricing,
+    #faq {
+      background: #ffffff;
+    }
+
+    .section-head {
+      display: grid;
+      justify-items: center;
+      max-width: 880px;
+      margin: 0 auto clamp(22px, 3vh, 30px);
+      text-align: center;
+    }
+
+    .section-head h2 {
+      max-width: 20ch;
+      margin-inline: auto;
+      font-size: clamp(2.35rem, 4.6vw, 3.85rem);
+    }
+
+    .section-head p {
+      max-width: 64ch;
+      margin-inline: auto;
+      font-size: 1.02rem;
+      line-height: 1.52;
+    }
+
+    .card,
+    .plan-card,
+    .shot-card,
+    details,
+    .placeholder-card,
+    .ecosystem-card {
+      border-color: rgba(29, 29, 31, 0.065);
+      box-shadow: 0 18px 55px rgba(29, 29, 31, 0.065);
+      backdrop-filter: none;
+    }
+
+    #integrations .card,
+    #pricing .plan-card:not(.featured),
+    #faq details {
+      background: #f5f5f7;
+    }
+
+    .ecosystem-card {
+      margin-top: 0;
+      padding: 22px;
+      border: 0;
+      border-radius: 32px;
+    }
+
+    .ecosystem-map {
+      min-height: 500px;
+    }
+
+    .fulfillment-layer {
+      margin-top: 56px;
+    }
+
+    .fulfillment-cluster {
+      min-height: 172px;
+      margin-top: 4px;
+    }
+
+    .radar {
+      width: min(100%, 168px);
+    }
+
+    .systems-layer {
+      margin-top: 56px;
+    }
+
+    .system-node {
+      min-height: 78px;
+      padding: 13px 12px;
+    }
+
+    .screenshots {
+      grid-template-columns: minmax(230px, 0.8fr) minmax(0, 1.2fr);
+      gap: clamp(36px, 7vw, 84px);
+      width: min(100%, 960px);
+      margin-inline: auto;
+    }
+
+    .phone-shell {
+      width: min(100%, 228px);
+    }
+
+    .phone-screen {
+      border-radius: 29px;
+      clip-path: inset(0 round 29px);
+      box-shadow: 0 26px 70px rgba(29, 29, 31, 0.17);
+    }
+
+    .screenshot-copy-card h3 {
+      max-width: 12ch;
+      font-size: clamp(2.35rem, 4.8vw, 4rem);
+      letter-spacing: -0.05em;
+      line-height: 0.98;
+    }
+
+    .screenshot-copy-card p {
+      font-size: 1.06rem;
+      line-height: 1.55;
+    }
+
+    #features .grid {
+      gap: 12px;
+    }
+
+    #features .card {
+      padding: 18px;
+    }
+
+    .step p {
+      margin-bottom: 0;
+      font-size: 0.91rem;
+      line-height: 1.48;
+    }
+
+    .integration-card {
+      min-height: 224px;
+      gap: 14px;
+      padding: 24px;
+    }
+
+    .integration-card p {
+      font-size: 0.94rem;
+      line-height: 1.5;
+    }
+
+    .research-grid {
+      gap: 14px;
+    }
+
+    #research .card {
+      padding: 20px;
+    }
+
+    .founder-story,
+    .research-card p,
+    .research-sources {
+      font-size: 0.91rem;
+      line-height: 1.48;
+    }
+
+    .research-sources {
+      gap: 5px;
+      margin-top: 10px;
+    }
+
+    .research-pill-row {
+      margin-top: 12px;
+    }
+
+    .research-disclaimer {
+      padding-top: 12px;
+    }
+
+    .plans {
+      gap: 14px;
+    }
+
+    .plan-card {
+      padding: 24px;
+    }
+
+    .plan-card.featured {
+      background: #1d1d1f;
+      box-shadow: 0 28px 70px rgba(29, 29, 31, 0.18);
+    }
+
+    .price {
+      font-size: clamp(2rem, 4vw, 2.85rem);
+    }
+
+    .price-before {
+      font-size: 2.3rem;
+    }
+
+    .comparison-intro-grid {
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .comparison-card {
+      padding: 20px;
+    }
+
+    .comparison-card h3 {
+      font-size: 1.22rem;
+    }
+
+    .comparison-card p {
+      font-size: 0.91rem;
+      line-height: 1.48;
+    }
+
+    .comparison-pill-row {
+      margin-top: 14px;
+    }
+
+    .comparison-table-card {
+      border-color: rgba(29, 29, 31, 0.08);
+      border-radius: 30px;
+      background: #ffffff;
+      box-shadow: 0 24px 70px rgba(29, 29, 31, 0.08);
+    }
+
+    .comparison-table-card.is-enhanced {
+      overflow: clip;
+    }
+
+    .comparison-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 18px 20px;
+      border-bottom: 1px solid rgba(29, 29, 31, 0.08);
+      background: rgba(255, 255, 255, 0.94);
+    }
+
+    .comparison-controls[hidden] {
+      display: none;
+    }
+
+    .comparison-controls > div {
+      display: grid;
+      gap: 2px;
+    }
+
+    .comparison-controls strong {
+      font-size: 1.22rem;
+      letter-spacing: -0.025em;
+    }
+
+    .comparison-controls-eyebrow,
+    .comparison-select-label > span:first-child {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 790;
+      letter-spacing: 0.07em;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }
+
+    .comparison-select-label {
+      display: grid;
+      gap: 6px;
+    }
+
+    .comparison-select-shell {
+      position: relative;
+      display: block;
+    }
+
+    .comparison-select-shell::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: 16px;
+      width: 7px;
+      height: 7px;
+      border-right: 2px solid #515154;
+      border-bottom: 2px solid #515154;
+      transform: translateY(-70%) rotate(45deg);
+      pointer-events: none;
+    }
+
+    .comparison-select-shell select {
+      min-width: 188px;
+      min-height: 44px;
+      padding: 0 42px 0 15px;
+      border: 1px solid rgba(29, 29, 31, 0.12);
+      border-radius: 999px;
+      color: var(--ink);
+      background: #f5f5f7;
+      font: inherit;
+      font-size: 0.94rem;
+      font-weight: 720;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    .comparison-select-shell select:focus-visible {
+      outline: 3px solid rgba(0, 122, 255, 0.28);
+      outline-offset: 2px;
+    }
+
+    .comparison-table-wrap.is-enhanced {
+      overflow: visible;
+      overscroll-behavior: auto;
+    }
+
+    .comparison-table.comparison-enhanced {
+      min-width: 0;
+      table-layout: fixed;
+    }
+
+    .comparison-table.comparison-enhanced th,
+    .comparison-table.comparison-enhanced td {
+      width: 50%;
+      min-width: 0;
+      padding: 18px 20px;
+    }
+
+    .comparison-table.comparison-enhanced .loom-column {
+      position: static;
+      min-width: 0;
+      box-shadow: none;
+    }
+
+    .comparison-table.comparison-enhanced thead th {
+      position: sticky;
+      top: 68px;
+      z-index: 5;
+      background: rgba(245, 248, 252, 0.96);
+      backdrop-filter: blur(18px);
+    }
+
+    .comparison-table.comparison-enhanced thead .loom-column {
+      z-index: 6;
+      background: rgba(231, 242, 255, 0.97);
+    }
+
+    .comparison-table.comparison-enhanced tbody tr:nth-child(even) td {
+      background: #fbfbfd;
+    }
+
+    .comparison-table.comparison-enhanced [hidden] {
+      display: none;
+    }
+
+    @media (min-width: 921px) {
+      #system,
+      #screenshots,
+      #features,
+      #integrations,
+      #research,
+      #pricing {
+        display: grid;
+        min-height: min(800px, calc(100svh - 68px));
+        align-items: center;
+      }
+    }
+
+    @media (min-width: 700px) and (max-width: 920px) {
+      .screenshots {
+        grid-template-columns: minmax(220px, 0.78fr) minmax(0, 1.22fr);
+      }
+
+      .research-grid {
+        grid-template-columns: 0.9fr 1.1fr;
+      }
+
+      .ecosystem-map {
+        min-height: 520px;
+      }
+
+      .fulfillment-cluster {
+        grid-template-columns: minmax(150px, 220px) minmax(186px, 1fr);
+        max-width: 620px;
+      }
+
+      .fulfillment-cluster-lines {
+        display: block;
+      }
+
+      .system-nodes {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-width: 760px;
+      }
+    }
+
+    @media (max-width: 920px) {
+      .hero {
+        min-height: min(760px, calc(100svh - 64px));
+      }
+
+      .hero::before {
+        background:
+          linear-gradient(90deg, #ffffff 0%, rgba(255, 255, 255, 0.97) 56%, rgba(255, 255, 255, 0.72) 100%),
+          radial-gradient(circle at 84% 42%, rgba(0, 122, 255, 0.12), transparent 42%),
+          url("assets/landing/loom-hero-phone.png") right -90px center / min(72vw, 560px) auto no-repeat;
+      }
+
+      .hero-content {
+        width: min(100%, 590px);
+      }
+
+      main > section {
+        padding: 62px 0;
+      }
+
+      .section-head {
+        display: grid;
+      }
+
+      .comparison-table.comparison-enhanced thead th {
+        top: 64px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .hero {
+        min-height: auto;
+      }
+
+      .hero::before {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.985)),
+          url("assets/landing/loom-hero-phone.png") right -158px top 18px / 330px auto no-repeat;
+      }
+
+      .hero::after {
+        display: none;
+      }
+
+      .hero-content {
+        padding: 44px 0 50px;
+      }
+
+      .hero-kicker {
+        max-width: 9.5ch;
+        font-size: clamp(3rem, 15vw, 4.25rem);
+      }
+
+      .hero .lead {
+        font-size: 1rem;
+      }
+
+      .hero .seo-lead {
+        font-size: 0.9rem;
+      }
+
+      .hero-button-row {
+        display: flex;
+        align-items: center;
+      }
+
+      .hero-button-row .button {
+        width: auto;
+        min-height: 48px;
+        padding-inline: 17px;
+      }
+
+      main > section {
+        padding: 56px 0;
+      }
+
+      .section-head {
+        margin-bottom: 22px;
+      }
+
+      .section-head h2 {
+        font-size: clamp(2.15rem, 10vw, 3rem);
+      }
+
+      .section-head p {
+        font-size: 0.96rem;
+      }
+
+      .ecosystem-card {
+        padding: 16px 12px;
+      }
+
+      .ecosystem-map {
+        min-height: auto;
+      }
+
+      .fulfillment-layer,
+      .systems-layer {
+        margin-top: 38px;
+      }
+
+      .fulfillment-cluster {
+        grid-template-columns: minmax(0, 1fr) minmax(122px, 146px);
+        max-width: 320px;
+        min-height: 0;
+        align-items: center;
+      }
+
+      .radar {
+        width: min(100%, 146px);
+      }
+
+      .system-nodes {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-width: 320px;
+        gap: 7px;
+      }
+
+      .system-node {
+        min-height: 82px;
+        padding: 10px 5px;
+      }
+
+      .system-node h3 {
+        font-size: 0.76rem;
+      }
+
+      .ecosystem-little-wins {
+        width: 70px;
+        transform: scale(0.82);
+      }
+
+      .phone-shell {
+        width: min(62vw, 216px);
+      }
+
+      .screenshots {
+        gap: 26px;
+      }
+
+      .screenshot-copy {
+        text-align: center;
+      }
+
+      .screenshot-copy-card h3,
+      .screenshot-copy-card p {
+        margin-inline: auto;
+      }
+
+      .screenshot-copy-card h3 {
+        font-size: 2.25rem;
+      }
+
+      #features .grid.four {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      #features .card {
+        align-content: start;
+        padding: 14px;
+      }
+
+      #features .step-icon {
+        width: 32px;
+        height: 32px;
+      }
+
+      #features .step h3 {
+        font-size: 1rem;
+      }
+
+      #features .step p {
+        font-size: 0.82rem;
+        line-height: 1.43;
+      }
+
+      .little-wins-stack {
+        width: 62px;
+        transform: scale(0.78);
+        transform-origin: left center;
+      }
+
+      .comparison-controls {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 16px;
+      }
+
+      .comparison-select-shell select {
+        width: 100%;
+      }
+
+      .comparison-table.comparison-enhanced th,
+      .comparison-table.comparison-enhanced td {
+        padding: 14px 11px;
+        font-size: 0.82rem;
+      }
+
+      .comparison-table.comparison-enhanced strong {
+        font-size: 0.84rem;
+      }
+
+      .comparison-table.comparison-enhanced .comparison-topic {
+        font-size: 0.66rem;
+        letter-spacing: 0.045em;
+      }
+    }
+
+    @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+      .card,
+      .plan-card,
+      .ecosystem-card,
+      .carousel-arrow {
+        transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 260ms ease;
+      }
+
+      .card:hover,
+      .plan-card:hover,
+      .ecosystem-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 24px 65px rgba(29, 29, 31, 0.095);
+      }
+
+      .plan-card.featured:hover {
+        box-shadow: 0 34px 78px rgba(29, 29, 31, 0.23);
+      }
+    }
+
+    @keyframes hero-visual-in {
+      from {
+        opacity: 0;
+        transform: scale(1.025);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .motion-ready .hero::before {
+        animation: hero-visual-in 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+      }
+
+      .motion-ready .reveal-item {
+        opacity: 0;
+        transform: translateY(18px);
+        transition:
+          opacity 680ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--reveal-delay, 0ms),
+          transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--reveal-delay, 0ms);
+      }
+
+      .motion-ready .reveal-item.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
   <link rel="stylesheet" href="/assets/site-navigation.css">
 </head>
@@ -2261,27 +3033,24 @@
           </div>
           <h1>Life management app for goals, habits, tasks, and purpose.</h1>
           <p class="hero-kicker">Your life is not a to-do list.</p>
-          <div class="hero-actions">
-            <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" aria-label="Download Loom Life Manager on the App Store" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="hero">
-              <img
-                class="app-store-badge"
-                alt="Download on the App Store"
-                width="250"
-                height="83"
-                decoding="async"
-                fetchpriority="high"
-                src="https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83">
-            </a>
-          </div>
           <p class="lead">
             Turn life's chaos into clarity with one iPhone life management system that connects what matters to what you do each day.
           </p>
           <p class="lead seo-lead">
             Purpose, fulfillment areas, goals, action plans, Little Wins, reflection, and LoomAI guidance work together instead of living in separate apps.
           </p>
-          <div class="hero-actions hero-actions-compact">
+          <div class="hero-actions">
             <div class="hero-button-row">
-              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="hero-secondary-primary">Download on App Store</a>
+              <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" aria-label="Download Loom Life Manager on the App Store" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="hero">
+                <img
+                  class="app-store-badge"
+                  alt="Download on the App Store"
+                  width="250"
+                  height="83"
+                  decoding="async"
+                  fetchpriority="high"
+                  src="https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83">
+              </a>
               <a class="button secondary" href="#system" data-hero-cta data-page-type="homepage" data-target-keyword="Life management app" data-cta-position="hero-secondary">See how Loom works</a>
             </div>
           </div>
@@ -2817,8 +3586,29 @@
         </p>
 
         <div class="comparison-table-card">
-          <div class="comparison-table-wrap" tabindex="0" aria-label="Scrollable comparison table">
-            <table class="comparison-table">
+          <div class="comparison-controls" data-comparison-controls hidden>
+            <div>
+              <span class="comparison-controls-eyebrow">Side-by-side view</span>
+              <strong aria-live="polite">Loom vs. <span data-comparison-name>Todoist</span></strong>
+            </div>
+            <label class="comparison-select-label" for="comparison-competitor">
+              <span>Compare Loom with</span>
+              <span class="comparison-select-shell">
+                <select id="comparison-competitor" aria-controls="comparison-table" data-comparison-select>
+                  <option value="1">Todoist</option>
+                  <option value="2">Notion</option>
+                  <option value="3">TickTick</option>
+                  <option value="4">Things 3</option>
+                  <option value="5">Structured</option>
+                  <option value="6">Sunsama</option>
+                  <option value="7">Streaks</option>
+                </select>
+              </span>
+            </label>
+          </div>
+          <div class="comparison-table-wrap" tabindex="0" aria-label="Scrollable comparison table" data-comparison-wrap>
+            <table class="comparison-table" id="comparison-table" data-comparison-table>
+              <caption class="visually-hidden">Feature-by-feature comparison of Loom and a selected productivity app.</caption>
               <thead>
                 <tr>
                   <th scope="col" class="loom-column">Loom</th>
@@ -3073,7 +3863,7 @@
   </footer>
 
   <script>
-
+    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const carousel = document.querySelector("[data-carousel]");
     if (carousel) {
       const screen = document.querySelector("[data-carousel-screen]");
@@ -3120,6 +3910,15 @@
 
         copyBlocks.forEach((copy, copyIndex) => {
           copy.classList.toggle("is-active", copyIndex === activeIndex);
+          if (copyIndex === activeIndex && copy.animate && !reducedMotionQuery.matches) {
+            copy.animate(
+              [
+                { opacity: 0, transform: "translateY(10px)" },
+                { opacity: 1, transform: "translateY(0)" }
+              ],
+              { duration: 380, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
+            );
+          }
         });
 
         dots.forEach((dot, dotIndex) => {
@@ -3129,6 +3928,7 @@
 
       function restartCarouselTimer() {
         window.clearInterval(carouselTimer);
+        if (reducedMotionQuery.matches || document.hidden || carousel.matches(":hover, :focus-within")) return;
         carouselTimer = window.setInterval(() => showSlide(activeIndex + 1), 4800);
       }
 
@@ -3142,7 +3942,115 @@
         restartCarouselTimer();
       });
 
+      carousel.addEventListener("mouseenter", () => window.clearInterval(carouselTimer));
+      carousel.addEventListener("mouseleave", restartCarouselTimer);
+      carousel.addEventListener("focusin", () => window.clearInterval(carouselTimer));
+      carousel.addEventListener("focusout", restartCarouselTimer);
+      document.addEventListener("visibilitychange", restartCarouselTimer);
+      reducedMotionQuery.addEventListener?.("change", restartCarouselTimer);
+
       restartCarouselTimer();
+    }
+
+    const comparisonTable = document.querySelector("[data-comparison-table]");
+    const comparisonSelect = document.querySelector("[data-comparison-select]");
+    const comparisonControls = document.querySelector("[data-comparison-controls]");
+    const comparisonName = document.querySelector("[data-comparison-name]");
+    const comparisonWrap = document.querySelector("[data-comparison-wrap]");
+
+    if (comparisonTable && comparisonSelect && comparisonControls && comparisonWrap) {
+      const comparisonRows = Array.from(comparisonTable.rows);
+      const comparisonCaption = comparisonTable.querySelector("caption");
+
+      function showCompetitor(columnIndex) {
+        const selectedIndex = Number(columnIndex);
+        const selectedHeader = comparisonRows[0]?.cells[selectedIndex];
+        if (!selectedHeader || selectedIndex < 1) return;
+
+        const selectedName = selectedHeader.textContent.trim();
+
+        comparisonRows.forEach((row, rowIndex) => {
+          Array.from(row.cells).forEach((cell, cellIndex) => {
+            cell.hidden = cellIndex !== 0 && cellIndex !== selectedIndex;
+            if (rowIndex > 0 && cellIndex === selectedIndex) {
+              cell.dataset.competitorLabel = selectedName;
+            }
+          });
+        });
+
+        if (comparisonName) comparisonName.textContent = selectedName;
+        if (comparisonCaption) {
+          comparisonCaption.textContent = `Feature-by-feature comparison of Loom and ${selectedName}.`;
+        }
+        comparisonTable.setAttribute("aria-label", `Loom versus ${selectedName} feature comparison`);
+        comparisonWrap.setAttribute("aria-label", `Loom versus ${selectedName} comparison table`);
+      }
+
+      comparisonTable.classList.add("comparison-enhanced");
+      comparisonTable.closest(".comparison-table-card")?.classList.add("is-enhanced");
+      comparisonWrap.classList.add("is-enhanced");
+      comparisonWrap.removeAttribute("tabindex");
+      comparisonControls.hidden = false;
+      showCompetitor(comparisonSelect.value);
+
+      comparisonSelect.addEventListener("change", () => {
+        showCompetitor(comparisonSelect.value);
+        if (typeof gtag === "function") {
+          gtag("event", "comparison_competitor_select", {
+            page_type: "homepage",
+            competitor: comparisonSelect.options[comparisonSelect.selectedIndex]?.text || ""
+          });
+        }
+      });
+    }
+
+    if (!reducedMotionQuery.matches && "IntersectionObserver" in window) {
+      const revealTargets = Array.from(document.querySelectorAll([
+        ".hero-content > *",
+        "#system .section-head",
+        "#system .ecosystem-card",
+        "#screenshots .section-head",
+        "#screenshots .screenshots",
+        "#features .section-head",
+        "#features .grid",
+        "#integrations .section-head",
+        "#integrations .grid",
+        "#research .section-head",
+        "#research .research-grid",
+        "#pricing .section-head",
+        "#pricing .plans",
+        "#compare .section-head",
+        "#compare .comparison-intro-grid",
+        "#compare .comparison-note",
+        "#compare .comparison-table-card",
+        "#compare .comparison-sources-details",
+        "#faq .section-head",
+        "#faq details"
+      ].join(",")));
+
+      const heroRevealTargets = Array.from(document.querySelectorAll(".hero-content > *"));
+      heroRevealTargets.forEach((target, index) => {
+        target.style.setProperty("--reveal-delay", `${index * 65}ms`);
+      });
+
+      revealTargets.forEach((target) => {
+        target.classList.add("reveal-item");
+        if (!target.classList.contains("section-head") && !target.closest(".hero-content")) {
+          target.style.setProperty("--reveal-delay", "80ms");
+        }
+      });
+
+      document.documentElement.classList.add("motion-ready");
+
+      const revealObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add("is-visible");
+          revealObserver.unobserve(entry.target);
+        });
+      }, { threshold: 0.08, rootMargin: "0px 0px -7% 0px" });
+
+      revealTargets.forEach((target) => revealObserver.observe(target));
     }
   </script>
 <script>
