@@ -1419,35 +1419,51 @@
     }
 
     #screenshots .carousel-arrow {
-      width: 116px;
-      height: 116px;
+      width: 64px;
+      height: 64px;
       border-color: rgba(29, 29, 31, 0.12);
       background: rgba(255, 255, 255, 0.94);
-      font-size: 3.4rem;
+      font-size: 1.9rem;
       box-shadow: 0 12px 30px rgba(29, 29, 31, 0.12);
+    }
+
+    #screenshots .carousel-dots {
+      gap: 8px;
+      padding-inline: 4px;
+    }
+
+    #screenshots .carousel-dot {
+      width: 9px;
+      height: 9px;
+    }
+
+    #screenshots .carousel-dot.is-active {
+      width: 30px;
     }
 
     @media (max-width: 699px) {
       #screenshots .carousel-arrow {
-        width: 108px;
-        height: 108px;
+        width: 56px;
+        height: 56px;
+        font-size: 1.65rem;
       }
 
       #screenshots .carousel-controls {
-        gap: 4px;
+        gap: 12px;
       }
 
       #screenshots .carousel-dots {
-        gap: 2px;
+        gap: 6px;
+        padding-inline: 2px;
       }
 
       #screenshots .carousel-dot {
-        width: 3px;
-        height: 3px;
+        width: 8px;
+        height: 8px;
       }
 
       #screenshots .carousel-dot.is-active {
-        width: 9px;
+        width: 26px;
       }
     }
 
