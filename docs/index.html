@@ -3867,6 +3867,381 @@
       }
     }
 
+    /* Compact left-graphic comparison steps */
+    #compare {
+      padding-block: clamp(42px, 6vh, 60px);
+    }
+
+    #compare .comparison-section-head {
+      margin-bottom: 14px;
+    }
+
+    #compare .comparison-section-subtitle {
+      max-width: 88ch;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    #compare .comparison-intro-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    #compare .comparison-card.comparison-point,
+    #compare .comparison-card.comparison-point.featured {
+      grid-template: minmax(0, 1fr) / 90px minmax(0, 1fr);
+      align-items: center;
+      gap: 15px;
+      min-height: 176px;
+      padding: 15px;
+      overflow: hidden;
+      border: 1px solid rgba(29, 29, 31, 0.09);
+      border-radius: 23px;
+      background: #ffffff;
+      box-shadow: 0 14px 38px rgba(29, 29, 31, 0.065);
+    }
+
+    #compare .comparison-card.comparison-point.featured {
+      border-color: rgba(0, 122, 255, 0.16);
+      background: linear-gradient(145deg, rgba(239, 247, 255, 0.95), #ffffff 58%);
+      box-shadow: 0 16px 42px rgba(0, 122, 255, 0.09);
+    }
+
+    #compare .comparison-simple-graphic {
+      position: relative;
+      isolation: isolate;
+      justify-self: start;
+      width: 90px;
+      height: 104px;
+      overflow: hidden;
+      border: 1px solid rgba(29, 29, 31, 0.07);
+      border-radius: 22px;
+      background: #f2f2f7;
+    }
+
+    #compare .comparison-system-graphic {
+      background:
+        radial-gradient(circle at 26% 22%, rgba(0, 122, 255, 0.14), transparent 42%),
+        #f2f6fb;
+    }
+
+    #compare .simple-system-line {
+      position: absolute;
+      z-index: 1;
+      border-radius: 99px;
+      background: rgba(0, 122, 255, 0.24);
+    }
+
+    #compare .simple-system-line-horizontal {
+      top: 51px;
+      left: 17px;
+      right: 14px;
+      height: 2px;
+    }
+
+    #compare .simple-system-line-vertical {
+      top: 16px;
+      bottom: 16px;
+      left: 44px;
+      width: 2px;
+    }
+
+    #compare .simple-system-hub {
+      position: absolute;
+      top: 39px;
+      left: 32px;
+      z-index: 3;
+      width: 26px;
+      height: 26px;
+      border-radius: 9px;
+      background: linear-gradient(145deg, var(--blue), var(--purple));
+      box-shadow: 0 8px 18px rgba(0, 122, 255, 0.24);
+    }
+
+    #compare .simple-system-hub::after {
+      content: "";
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      width: 8px;
+      height: 8px;
+      border: 1.5px solid rgba(255, 255, 255, 0.95);
+      border-radius: 1px;
+      transform: rotate(45deg);
+    }
+
+    #compare .simple-system-node {
+      position: absolute;
+      z-index: 2;
+      width: 14px;
+      height: 14px;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 4px 10px rgba(29, 29, 31, 0.12);
+    }
+
+    #compare .simple-system-node-top {
+      top: 9px;
+      left: 38px;
+      background: var(--blue);
+    }
+
+    #compare .simple-system-node-right {
+      top: 45px;
+      right: 7px;
+      background: var(--green);
+    }
+
+    #compare .simple-system-node-bottom {
+      bottom: 9px;
+      left: 38px;
+      background: var(--orange);
+    }
+
+    #compare .comparison-guidance-graphic {
+      background:
+        radial-gradient(circle at 74% 18%, rgba(52, 199, 89, 0.14), transparent 42%),
+        #f4f8f5;
+    }
+
+    #compare .comparison-guidance-graphic::before {
+      content: "";
+      position: absolute;
+      top: 22px;
+      bottom: 22px;
+      left: 22px;
+      width: 2px;
+      border-radius: 99px;
+      background: rgba(0, 122, 255, 0.2);
+    }
+
+    #compare .simple-guidance-step {
+      position: absolute;
+      left: 14px;
+      z-index: 2;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 4px 10px rgba(0, 122, 255, 0.18);
+    }
+
+    #compare .simple-guidance-step::before {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 5px;
+      width: 4px;
+      height: 7px;
+      border-right: 1.5px solid #ffffff;
+      border-bottom: 1.5px solid #ffffff;
+      transform: rotate(45deg);
+    }
+
+    #compare .simple-guidance-step::after {
+      content: "";
+      position: absolute;
+      top: 5px;
+      left: 28px;
+      width: 40px;
+      height: 6px;
+      border-radius: 99px;
+      background: rgba(0, 122, 255, 0.24);
+    }
+
+    #compare .simple-guidance-step-one {
+      top: 17px;
+    }
+
+    #compare .simple-guidance-step-two {
+      top: 43px;
+      background: var(--green);
+    }
+
+    #compare .simple-guidance-step-two::after {
+      width: 34px;
+      background: rgba(52, 199, 89, 0.26);
+    }
+
+    #compare .simple-guidance-step-three {
+      top: 69px;
+      background: var(--purple);
+    }
+
+    #compare .simple-guidance-step-three::after {
+      width: 28px;
+      background: rgba(175, 82, 222, 0.24);
+    }
+
+    #compare .comparison-progress-graphic {
+      background:
+        radial-gradient(circle at 24% 76%, rgba(255, 149, 0, 0.15), transparent 42%),
+        #faf6f2;
+    }
+
+    #compare .simple-progress-ring {
+      position: absolute;
+      top: 22px;
+      left: 15px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: conic-gradient(var(--blue) 0 30%, var(--green) 30% 58%, var(--orange) 58% 80%, var(--purple) 80% 100%);
+      box-shadow: 0 8px 20px rgba(29, 29, 31, 0.1);
+    }
+
+    #compare .simple-progress-ring::before {
+      content: "";
+      position: absolute;
+      inset: 7px;
+      border-radius: 50%;
+      background: #ffffff;
+    }
+
+    #compare .simple-progress-ring::after {
+      content: "";
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(29, 29, 31, 0.44);
+      border-radius: 2px;
+      transform: rotate(45deg);
+    }
+
+    #compare .simple-progress-dot {
+      position: absolute;
+      z-index: 2;
+      width: 10px;
+      height: 10px;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 3px 8px rgba(29, 29, 31, 0.12);
+    }
+
+    #compare .simple-progress-dot-blue {
+      top: 18px;
+      left: 16px;
+      background: var(--blue);
+    }
+
+    #compare .simple-progress-dot-green {
+      top: 47px;
+      right: 9px;
+      background: var(--green);
+    }
+
+    #compare .simple-progress-dot-orange {
+      bottom: 14px;
+      left: 38px;
+      background: var(--orange);
+    }
+
+    #compare .comparison-card-copy {
+      align-self: center;
+      justify-content: center;
+      min-width: 0;
+      padding: 0;
+    }
+
+    #compare .comparison-point .comparison-kicker {
+      min-height: 22px;
+      padding: 0 7px;
+      font-size: 0.61rem;
+    }
+
+    #compare .comparison-point h3 {
+      margin: 8px 0 5px;
+      font-size: 1.14rem;
+      line-height: 1.12;
+    }
+
+    #compare .comparison-point p {
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+
+    @media (min-width: 700px) and (max-width: 920px) {
+      #compare .comparison-intro-grid {
+        grid-template-columns: minmax(0, 1fr);
+        max-width: 780px;
+        gap: 10px;
+      }
+
+      #compare .comparison-card.comparison-point,
+      #compare .comparison-card.comparison-point.featured {
+        grid-template: minmax(0, 1fr) / 90px minmax(0, 1fr);
+        min-height: 118px;
+        padding: 12px 16px;
+      }
+
+      #compare .comparison-simple-graphic {
+        width: 84px;
+        height: 92px;
+      }
+
+      #compare .comparison-point p {
+        font-size: 0.84rem;
+      }
+    }
+
+    @media (max-width: 699px) {
+      #compare {
+        padding-block: 36px;
+      }
+
+      #compare .comparison-section-head {
+        margin-bottom: 12px;
+      }
+
+      #compare .comparison-section-subtitle {
+        font-size: 0.82rem;
+        line-height: 1.4;
+      }
+
+      #compare .comparison-intro-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 9px;
+      }
+
+      #compare .comparison-card.comparison-point,
+      #compare .comparison-card.comparison-point.featured {
+        grid-template: minmax(0, 1fr) / 74px minmax(0, 1fr);
+        gap: 11px;
+        min-height: 116px;
+        padding: 10px 12px;
+        border-radius: 19px;
+      }
+
+      #compare .comparison-simple-graphic {
+        width: 74px;
+        height: 86px;
+        border-radius: 18px;
+      }
+
+      #compare .simple-guidance-step-three {
+        top: 65px;
+      }
+
+      #compare .comparison-point .comparison-kicker {
+        display: none;
+      }
+
+      #compare .comparison-point h3 {
+        margin: 0 0 4px;
+        font-size: 1.02rem;
+        line-height: 1.1;
+      }
+
+      #compare .comparison-point p {
+        font-size: 0.82rem;
+        line-height: 1.36;
+      }
+    }
+
   </style>
   <link rel="stylesheet" href="/assets/site-navigation.css">
 </head>
@@ -4450,42 +4825,49 @@
         <div class="section-head comparison-section-head">
           <div>
             <h2>See why Loom is the better life-management system.</h2>
-            <p class="comparison-section-subtitle">Nothing compares to Loom&rsquo;s connected approach. Other productivity apps cover pieces of the picture&mdash;or approximate missing workflows with templates and manual setup&mdash;but Loom makes purpose, goals, daily action, reflection, health signals, and LoomAI one complete life-management system by default.</p>
+            <p class="comparison-section-subtitle">Nothing compares to Loom&rsquo;s connected approach. Other apps cover pieces or require templates and manual setup; Loom connects purpose, goals, daily action, reflection, health signals, and LoomAI by default.</p>
           </div>
         </div>
 
         <div class="comparison-intro-grid">
           <article class="card comparison-card comparison-point comparison-point-system featured">
-            <figure class="comparison-app-visual comparison-app-visual-system">
-              <img class="comparison-app-screenshot" src="assets/landing/loom-home-seo.jpg" alt="Loom home screen connecting Purpose, Fulfillment, and Goals" width="331" height="720" loading="lazy" decoding="async">
-              <figcaption class="comparison-screen-label">Loom Home</figcaption>
-            </figure>
+            <div class="comparison-simple-graphic comparison-system-graphic" aria-hidden="true">
+              <span class="simple-system-line simple-system-line-horizontal"></span>
+              <span class="simple-system-line simple-system-line-vertical"></span>
+              <i class="simple-system-node simple-system-node-top"></i>
+              <i class="simple-system-node simple-system-node-right"></i>
+              <i class="simple-system-node simple-system-node-bottom"></i>
+              <b class="simple-system-hub"></b>
+            </div>
             <div class="comparison-card-copy">
               <span class="comparison-kicker">One connected system</span>
               <h3>Your whole life, connected.</h3>
-              <p>Purpose, life areas, goals, Action Plans, Little Wins, reflection, health, and LoomAI move together.</p>
+              <p>Purpose, goals, Action Plans, Little Wins, health, and LoomAI move together.</p>
             </div>
           </article>
           <article class="card comparison-card comparison-point comparison-point-flow">
-            <figure class="comparison-app-visual comparison-app-visual-flow">
-              <img class="comparison-app-screenshot" src="assets/landing/loom-ai-seo.jpg" alt="LoomAI screen turning a goal into clear suggested actions" width="331" height="720" loading="lazy" decoding="async">
-              <figcaption class="comparison-screen-label">LoomAI Guidance</figcaption>
-            </figure>
+            <div class="comparison-simple-graphic comparison-guidance-graphic" aria-hidden="true">
+              <span class="simple-guidance-step simple-guidance-step-one"></span>
+              <span class="simple-guidance-step simple-guidance-step-two"></span>
+              <span class="simple-guidance-step simple-guidance-step-three"></span>
+            </div>
             <div class="comparison-card-copy">
               <span class="comparison-kicker">Built-in guidance</span>
               <h3>Ready without the setup.</h3>
-              <p>Skip databases, templates, and manual dashboards. Follow a guided daily flow from intent to action.</p>
+              <p>Skip templates and dashboards. Move from intent to action with a guided daily flow.</p>
             </div>
           </article>
           <article class="card comparison-card comparison-point comparison-point-alignment">
-            <figure class="comparison-app-visual comparison-app-visual-alignment">
-              <img class="comparison-app-screenshot" src="assets/landing/loom-goals-seo.jpg" alt="Loom Goals screen showing meaningful outcomes, timelines, and progress" width="331" height="720" loading="lazy" decoding="async">
-              <figcaption class="comparison-screen-label">Goals &amp; Progress</figcaption>
-            </figure>
+            <div class="comparison-simple-graphic comparison-progress-graphic" aria-hidden="true">
+              <span class="simple-progress-ring"></span>
+              <i class="simple-progress-dot simple-progress-dot-blue"></i>
+              <i class="simple-progress-dot simple-progress-dot-green"></i>
+              <i class="simple-progress-dot simple-progress-dot-orange"></i>
+            </div>
             <div class="comparison-card-copy">
               <span class="comparison-kicker">Purpose-led progress</span>
               <h3>Progress with meaning.</h3>
-              <p>Keep tasks and habits tied to your life areas, goals, and the person you want to become.</p>
+              <p>Keep daily actions tied to your life areas, goals, and who you want to become.</p>
             </div>
           </article>
         </div>
