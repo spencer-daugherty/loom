@@ -445,9 +445,10 @@
 
     .ecosystem-lines path {
       fill: none;
-      stroke-width: 2;
+      stroke-width: 1.7;
       stroke-linecap: round;
-      opacity: 0.58;
+      opacity: 0.62;
+      vector-effect: non-scaling-stroke;
     }
 
     .ecosystem-layer {
@@ -1356,6 +1357,59 @@
       font-size: 0.82rem;
     }
 
+    /* Centered carousel navigation and transparent device framing */
+    #screenshots .screenshots {
+      min-width: 0;
+      column-gap: clamp(36px, 7vw, 84px);
+      row-gap: clamp(20px, 3vw, 30px);
+    }
+
+    #screenshots .phone-stage,
+    #screenshots .screenshot-copy {
+      min-width: 0;
+    }
+
+    #screenshots .phone-shell {
+      aspect-ratio: 1287 / 2778;
+      filter: drop-shadow(0 26px 36px rgba(29, 29, 31, 0.18));
+    }
+
+    #screenshots .phone-screen {
+      inset: 6%;
+      border: 0;
+      border-radius: 10% / 4.6%;
+      clip-path: none;
+      box-shadow: none;
+      background-size: cover;
+    }
+
+    #screenshots .phone-frame {
+      z-index: 4;
+    }
+
+    #screenshots .carousel-controls {
+      grid-column: 1 / -1;
+      justify-self: center;
+      width: 100%;
+      gap: clamp(14px, 2vw, 22px);
+    }
+
+    #screenshots .carousel-arrow {
+      width: 58px;
+      height: 58px;
+      border-color: rgba(29, 29, 31, 0.12);
+      background: rgba(255, 255, 255, 0.94);
+      font-size: 1.7rem;
+      box-shadow: 0 12px 30px rgba(29, 29, 31, 0.12);
+    }
+
+    @media (max-width: 699px) {
+      #screenshots .carousel-arrow {
+        width: 54px;
+        height: 54px;
+      }
+    }
+
     @media (max-width: 920px) {
       .hero {
         min-height: auto;
@@ -1609,13 +1663,40 @@
         <div class="ecosystem-card">
             <div class="ecosystem-map" aria-label="Static Loom Ecosystem map">
               <svg class="ecosystem-lines" viewBox="0 0 1000 680" preserveAspectRatio="none" aria-hidden="true">
-              <path d="M380 112 Q510 248 625 386" stroke="rgba(150, 150, 150, 0.72)"></path>
-              <path d="M460 112 Q548 244 625 386" stroke="rgba(180, 180, 180, 0.74)"></path>
-              <path d="M540 112 Q590 240 625 386" stroke="rgba(150, 150, 150, 0.72)"></path>
-              <path d="M620 112 Q638 240 625 386" stroke="rgba(180, 180, 180, 0.74)"></path>
-              <path d="M625 424 Q420 518 205 608" stroke="rgba(0, 122, 255, 0.58)"></path>
-              <path d="M625 424 Q560 516 500 608" stroke="rgba(52, 199, 89, 0.58)"></path>
-              <path d="M625 424 Q716 518 795 608" stroke="rgba(255, 149, 0, 0.58)"></path>
+                <g class="ecosystem-route-bundle ecosystem-route-purpose">
+                  <path d="M365 112 C410 188 520 296 607 386" stroke="rgba(255, 45, 85, 0.68)"></path>
+                  <path d="M380 112 C432 196 532 300 615 386" stroke="rgba(175, 82, 222, 0.68)"></path>
+                  <path d="M395 112 C450 204 545 304 623 386" stroke="rgba(0, 122, 255, 0.68)"></path>
+                  <path d="M445 112 C474 194 548 298 612 386" stroke="rgba(0, 122, 255, 0.68)"></path>
+                  <path d="M460 112 C492 202 558 302 620 386" stroke="rgba(90, 200, 250, 0.68)"></path>
+                  <path d="M475 112 C510 210 568 306 628 386" stroke="rgba(48, 176, 199, 0.68)"></path>
+                  <path d="M525 112 C542 194 580 298 617 386" stroke="rgba(255, 149, 0, 0.68)"></path>
+                  <path d="M540 112 C558 202 590 302 625 386" stroke="rgba(255, 204, 0, 0.68)"></path>
+                  <path d="M555 112 C574 210 600 306 633 386" stroke="rgba(255, 59, 48, 0.68)"></path>
+                  <path d="M605 112 C608 194 615 298 622 386" stroke="rgba(52, 199, 89, 0.68)"></path>
+                  <path d="M620 112 C624 202 625 302 630 386" stroke="rgba(48, 176, 199, 0.68)"></path>
+                  <path d="M635 112 C640 210 635 306 638 386" stroke="rgba(175, 82, 222, 0.68)"></path>
+                </g>
+                <g class="ecosystem-route-bundle ecosystem-route-systems">
+                  <path d="M608 424 C560 468 398 548 175 608" stroke="rgba(0, 122, 255, 0.68)"></path>
+                  <path d="M614 424 C566 476 408 552 185 608" stroke="rgba(255, 149, 0, 0.68)"></path>
+                  <path d="M620 424 C572 484 418 556 195 608" stroke="rgba(255, 59, 48, 0.68)"></path>
+                  <path d="M626 424 C578 492 428 560 205 608" stroke="rgba(52, 199, 89, 0.68)"></path>
+                  <path d="M632 424 C584 500 438 564 215 608" stroke="rgba(175, 82, 222, 0.68)"></path>
+                  <path d="M638 424 C590 508 448 568 225 608" stroke="rgba(48, 176, 199, 0.68)"></path>
+                  <path d="M610 424 C594 472 548 548 465 608" stroke="rgba(0, 122, 255, 0.68)"></path>
+                  <path d="M616 424 C602 478 554 552 477 608" stroke="rgba(255, 149, 0, 0.68)"></path>
+                  <path d="M622 424 C610 484 560 556 489 608" stroke="rgba(255, 59, 48, 0.68)"></path>
+                  <path d="M628 424 C618 490 566 560 501 608" stroke="rgba(52, 199, 89, 0.68)"></path>
+                  <path d="M634 424 C626 496 572 564 513 608" stroke="rgba(175, 82, 222, 0.68)"></path>
+                  <path d="M640 424 C634 502 578 568 525 608" stroke="rgba(48, 176, 199, 0.68)"></path>
+                  <path d="M612 424 C660 472 708 548 765 608" stroke="rgba(0, 122, 255, 0.68)"></path>
+                  <path d="M618 424 C668 478 718 552 777 608" stroke="rgba(255, 149, 0, 0.68)"></path>
+                  <path d="M624 424 C676 484 728 556 789 608" stroke="rgba(255, 59, 48, 0.68)"></path>
+                  <path d="M630 424 C684 490 738 560 801 608" stroke="rgba(52, 199, 89, 0.68)"></path>
+                  <path d="M636 424 C692 496 748 564 813 608" stroke="rgba(175, 82, 222, 0.68)"></path>
+                  <path d="M642 424 C700 502 758 568 825 608" stroke="rgba(48, 176, 199, 0.68)"></path>
+                </g>
             </svg>
 
             <div class="ecosystem-layer purpose-layer">
@@ -1738,27 +1819,15 @@
           </div>
         </div>
 
-        <div class="screenshots">
-          <div class="phone-stage" data-carousel>
-            <div class="phone-shell" aria-label="Loom app screenshots in an iPhone 17 Pro frame">
+        <div class="screenshots" data-carousel>
+          <div class="phone-stage">
+            <div class="phone-shell" aria-label="Loom app screenshots in an iPhone 17 Pro Max frame">
               <div
                 class="phone-screen"
                 data-carousel-screen
                 role="img"
                 aria-label="Loom home screen showing Purpose, Fulfillment, Goals, and Capture"></div>
-              <img class="phone-frame" src="assets/landing/iphone-17-pro-frame-front.png" alt="" aria-hidden="true" width="1287" height="2778" decoding="async">
-            </div>
-            <div class="carousel-controls" aria-label="Screenshot carousel controls">
-              <button class="carousel-arrow" type="button" data-carousel-prev aria-label="Previous screenshot">&larr;</button>
-              <div class="carousel-dots" aria-hidden="true">
-                <span class="carousel-dot is-active" data-carousel-dot></span>
-                <span class="carousel-dot" data-carousel-dot></span>
-                <span class="carousel-dot" data-carousel-dot></span>
-                <span class="carousel-dot" data-carousel-dot></span>
-                <span class="carousel-dot" data-carousel-dot></span>
-                <span class="carousel-dot" data-carousel-dot></span>
-              </div>
-              <button class="carousel-arrow" type="button" data-carousel-next aria-label="Next screenshot">&rarr;</button>
+              <img class="phone-frame" src="assets/landing/iphone-17-pro-frame.png" alt="" aria-hidden="true" width="1287" height="2778" decoding="async">
             </div>
           </div>
 
@@ -1787,6 +1856,18 @@
               <h3>LoomAI guidance</h3>
               <p>Ask for help clarifying goals, plans, priorities, rewrites, and next steps without leaving your system.</p>
             </article>
+          </div>
+          <div class="carousel-controls" aria-label="Screenshot carousel controls">
+            <button class="carousel-arrow" type="button" data-carousel-prev aria-label="Previous screenshot">&larr;</button>
+            <div class="carousel-dots" aria-hidden="true">
+              <span class="carousel-dot is-active" data-carousel-dot></span>
+              <span class="carousel-dot" data-carousel-dot></span>
+              <span class="carousel-dot" data-carousel-dot></span>
+              <span class="carousel-dot" data-carousel-dot></span>
+              <span class="carousel-dot" data-carousel-dot></span>
+              <span class="carousel-dot" data-carousel-dot></span>
+            </div>
+            <button class="carousel-arrow" type="button" data-carousel-next aria-label="Next screenshot">&rarr;</button>
           </div>
         </div>
       </div>
