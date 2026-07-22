@@ -1,0 +1,304 @@
+/* Loom-native comparison overview artwork */
+#compare .comparison-intro-grid {
+  gap: clamp(12px, 1.5vw, 18px);
+}
+
+#compare .comparison-card.comparison-point,
+#compare .comparison-card.comparison-point.featured {
+  grid-template: minmax(0, 1fr) / 104px minmax(0, 1fr);
+  gap: 17px;
+  min-height: 184px;
+  padding: 14px;
+  border-radius: 26px;
+  box-shadow: 0 18px 44px rgba(29, 29, 31, 0.075);
+}
+
+#compare .comparison-card.comparison-point::before {
+  content: none;
+}
+
+#compare .comparison-card.comparison-point.comparison-point-system,
+#compare .comparison-card.comparison-point.comparison-point-system.featured {
+  --comparison-accent: #005fbd;
+  --comparison-kicker: #e5f2ff;
+  border-color: rgba(0, 122, 255, 0.13);
+  background: linear-gradient(145deg, #edf6ff 0%, #ffffff 68%);
+}
+
+#compare .comparison-card.comparison-point.comparison-point-flow {
+  --comparison-accent: #137333;
+  --comparison-kicker: #e4f8eb;
+  border-color: rgba(52, 199, 89, 0.14);
+  background: linear-gradient(145deg, #eefbf3 0%, #ffffff 68%);
+}
+
+#compare .comparison-card.comparison-point.comparison-point-alignment {
+  --comparison-accent: #a84e00;
+  --comparison-kicker: #fff0df;
+  border-color: rgba(255, 149, 0, 0.16);
+  background: linear-gradient(145deg, #fff5e9 0%, #ffffff 68%);
+}
+
+#compare .comparison-simple-graphic {
+  width: 104px;
+  height: 116px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 27px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    0 14px 28px rgba(29, 29, 31, 0.15);
+}
+
+/* Connected Loom core */
+#compare .comparison-system-graphic {
+  background: linear-gradient(145deg, #0a84ff 0%, #5e5ce6 58%, #bf5af2 100%);
+}
+
+#compare .simple-system-line {
+  z-index: 1;
+  width: auto;
+  height: auto;
+  border: 1.5px solid rgba(255, 255, 255, 0.43);
+  border-radius: 50%;
+  background: transparent;
+}
+
+#compare .simple-system-line-horizontal {
+  inset: 18% 8%;
+  transform: rotate(-15deg);
+}
+
+#compare .simple-system-line-vertical {
+  inset: 8% 29%;
+  transform: rotate(23deg);
+}
+
+#compare .simple-system-hub {
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  width: 40%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 31%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(40, 28, 112, 0.28);
+  transform: translate(-50%, -50%);
+}
+
+#compare .simple-system-hub::after {
+  top: 27%;
+  left: 27%;
+  width: 46%;
+  height: 46%;
+  border: 0;
+  border-radius: 28%;
+  background: linear-gradient(145deg, #007aff, #af52de);
+  box-shadow: 0 4px 10px rgba(0, 122, 255, 0.22);
+  transform: rotate(45deg);
+}
+
+#compare .simple-system-node {
+  z-index: 2;
+  width: 12%;
+  height: auto;
+  aspect-ratio: 1;
+  border: 2px solid rgba(255, 255, 255, 0.94);
+  box-shadow: 0 5px 12px rgba(30, 24, 92, 0.23);
+}
+
+#compare .simple-system-node-top {
+  top: 12%;
+  left: 18%;
+  background: #ffd60a;
+}
+
+#compare .simple-system-node-right {
+  top: 39%;
+  right: 8%;
+  background: #30d158;
+}
+
+#compare .simple-system-node-bottom {
+  bottom: 11%;
+  left: 22%;
+  background: #ff9f0a;
+}
+
+/* Guided daily flow */
+#compare .comparison-guidance-graphic {
+  background: linear-gradient(145deg, #30d158 0%, #20b8a5 48%, #0a84ff 100%);
+}
+
+#compare .comparison-guidance-graphic::before {
+  top: -18%;
+  right: -22%;
+  bottom: auto;
+  left: auto;
+  width: 74%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.17);
+}
+
+#compare .simple-guidance-step {
+  left: 10%;
+  right: 10%;
+  z-index: 2;
+  width: auto;
+  height: 22%;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 14px rgba(9, 79, 76, 0.16);
+}
+
+#compare .simple-guidance-step::before {
+  top: 50%;
+  left: 10%;
+  width: 16%;
+  height: auto;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0 25%, transparent 28%), var(--step-color);
+  box-shadow: none;
+  transform: translateY(-50%);
+}
+
+#compare .simple-guidance-step::after {
+  top: 50%;
+  left: 34%;
+  width: 48%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--step-soft);
+  transform: translateY(-50%);
+}
+
+#compare .simple-guidance-step-one {
+  --step-color: #007aff;
+  --step-soft: rgba(0, 122, 255, 0.28);
+  top: 11%;
+}
+
+#compare .simple-guidance-step-two {
+  --step-color: #34c759;
+  --step-soft: rgba(52, 199, 89, 0.3);
+  top: 39%;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+#compare .simple-guidance-step-three {
+  --step-color: #af52de;
+  --step-soft: rgba(175, 82, 222, 0.28);
+  top: 67%;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+#compare .simple-guidance-step-two::after,
+#compare .simple-guidance-step-three::after {
+  width: 48%;
+  background: var(--step-soft);
+}
+
+/* Purpose-led progress */
+#compare .comparison-progress-graphic {
+  background: linear-gradient(145deg, #ff9f0a 0%, #ff375f 56%, #bf5af2 100%);
+}
+
+#compare .simple-progress-ring {
+  top: 8%;
+  left: 19%;
+  width: 62%;
+  height: auto;
+  aspect-ratio: 1;
+  background: conic-gradient(#ffffff 0 74%, rgba(255, 255, 255, 0.24) 74% 100%);
+  box-shadow: 0 8px 20px rgba(115, 32, 75, 0.21);
+}
+
+#compare .simple-progress-ring::before {
+  inset: 10%;
+  background: linear-gradient(145deg, #ff9f0a 0%, #ff375f 64%, #bf5af2 100%);
+}
+
+#compare .simple-progress-ring::after {
+  top: 35%;
+  left: 35%;
+  width: 26%;
+  height: 26%;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 24%;
+  background: rgba(255, 255, 255, 0.18);
+  transform: rotate(45deg);
+}
+
+#compare .simple-progress-dot {
+  top: auto;
+  bottom: 9%;
+  width: 12%;
+  border: 0;
+  border-radius: 999px 999px 5px 5px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: none;
+}
+
+#compare .simple-progress-dot-blue {
+  left: 29%;
+  height: 10%;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+#compare .simple-progress-dot-green {
+  right: auto;
+  left: 44%;
+  height: 17%;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+#compare .simple-progress-dot-orange {
+  bottom: 9%;
+  left: 59%;
+  height: 24%;
+  background: #ffffff;
+}
+
+#compare .comparison-point .comparison-kicker {
+  color: var(--comparison-accent);
+  border: 1px solid color-mix(in srgb, var(--comparison-accent) 16%, transparent);
+  background: var(--comparison-kicker);
+}
+
+@media (min-width: 700px) and (max-width: 920px) {
+  #compare .comparison-card.comparison-point,
+  #compare .comparison-card.comparison-point.featured {
+    grid-template: minmax(0, 1fr) / 96px minmax(0, 1fr);
+    gap: 16px;
+    min-height: 128px;
+    padding: 12px 15px;
+  }
+
+  #compare .comparison-simple-graphic {
+    width: 96px;
+    height: 100px;
+    border-radius: 24px;
+  }
+}
+
+@media (max-width: 699px) {
+  #compare .comparison-card.comparison-point,
+  #compare .comparison-card.comparison-point.featured {
+    grid-template: minmax(0, 1fr) / 82px minmax(0, 1fr);
+    gap: 12px;
+    min-height: 116px;
+    padding: 11px;
+  }
+
+  #compare .comparison-simple-graphic {
+    width: 82px;
+    height: 88px;
+    border-radius: 21px;
+  }
+}
