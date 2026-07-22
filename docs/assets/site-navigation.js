@@ -31,6 +31,7 @@
     if (path.indexOf('/ambassadors/') === 0) return 'ambassadors';
     if (path === '/support.html' || path === '/privacy.html') return 'support';
     if (path.indexOf('/founding-member/') === 0) return 'pricing';
+    if (path.indexOf('/investor/') === 0) return '';
     if (path === '/' || path === '/landing.html' || path === '/splash.html') return '';
     return 'articles';
   }
