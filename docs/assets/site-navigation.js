@@ -7,6 +7,24 @@
   var backdrop = header.querySelector('[data-site-menu-dismiss]');
   var label = toggle ? toggle.querySelector('[data-site-menu-label]') : null;
   var mobileQuery = window.matchMedia('(max-width: 980px)');
+  var ambassadorBanner = document.querySelector('[data-ambassador-banner-link]');
+  var ambassadorBannerDismiss = document.querySelector('[data-ambassador-banner-dismiss]');
+
+  if (ambassadorBannerDismiss) {
+    ambassadorBannerDismiss.addEventListener('click', function () {
+      document.documentElement.classList.add('ambassador-banner-dismissed');
+      try {
+        window.localStorage.setItem('loom-ambassador-banner-dismissed-open-v2', '1');
+      } catch (error) {}
+      if (typeof window.gtag === 'function') window.gtag('event', 'ambassador_banner_dismiss', { page_type: 'homepage' });
+    });
+  }
+
+  if (ambassadorBanner) {
+    ambassadorBanner.addEventListener('click', function () {
+      if (typeof window.gtag === 'function') window.gtag('event', 'ambassador_banner_click', { page_type: 'homepage' });
+    });
+  }
 
   function navigationSection() {
     var path = window.location.pathname.replace(/\/index\.html$/, '/');

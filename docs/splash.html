@@ -1459,7 +1459,6 @@
         <nav class="site-primary-links" aria-label="Primary navigation">
           <a href="/#system">How it works</a>
           <a href="/#pricing" data-nav-link="pricing">Pricing</a>
-          <a href="/best/" data-nav-link="articles">Articles</a>
           <a href="/ambassadors/" data-nav-link="ambassadors">Ambassadors</a>
           <a href="/support.html" data-nav-link="support">Support</a>
         </nav>
@@ -1476,7 +1475,6 @@
         <a href="/">Home</a>
         <a href="/#system">How it works</a>
         <a href="/#pricing" data-nav-link="pricing">Pricing</a>
-        <a href="/best/" data-nav-link="articles">Articles</a>
         <a href="/ambassadors/" data-nav-link="ambassadors">Ambassadors</a>
         <a href="/support.html" data-nav-link="support">Support</a>
       </div>
@@ -1907,51 +1905,47 @@
           <div>
             <h2>Same premium access, flexible options.</h2>
             <p>
-              Choose lifetime access during the launch window, or subscribe annually or monthly as those options become available.
+              Choose annual, monthly, or lifetime access directly in the App Store.
             </p>
           </div>
         </div>
 
         <div class="grid three plans">
-          <article class="plan-card featured" id="plan-lifetime" data-plan-card data-remove-after="2026-05-31T23:59:59-04:00">
+          <article class="plan-card featured" id="plan-lifetime" data-plan-card>
             <div class="plan-header">
-              <div class="countdown-box">
-                <span class="countdown-label">Limited offer</span>
-                <span class="countdown-value" id="countdown-lifetime">Loading...</span>
-              </div>
-              <h3>Founding Member (Lifetime)</h3>
+              <h3>Lifetime</h3>
             </div>
-            <div class="price">$129 <span>one-time</span></div>
-            <p>One-time purchase. No subscription renewal. Full access to current and upcoming Loom features for life.</p>
+            <div class="price">$129 <span>once</span></div>
+            <p>One-time purchase with no subscription renewal. Full access to current and upcoming Loom features for life.</p>
             <div class="button-row">
-              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="splash" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="pricing">Get lifetime access</a>
+              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="splash" data-target-keyword="Loom Lifetime" data-competitor="" data-cta-position="pricing-lifetime">Choose lifetime</a>
             </div>
             <p class="plan-disclaimer">Billed by Apple after purchase confirmation through the App Store.</p>
           </article>
 
-          <article class="plan-card unavailable" id="plan-annual" data-plan-card data-unlock-at="2026-06-01T00:00:00-04:00">
+          <article class="plan-card" id="plan-annual" data-plan-card>
             <div class="plan-header">
-              <div class="countdown-box">
-                <span class="countdown-label">Launches Soon</span>
-                <span class="countdown-value" id="countdown-annual">Loading...</span>
-              </div>
               <h3>Annual</h3>
             </div>
             <div class="price-before">$180</div>
             <div class="price">$79 / year</div>
-            <p>Auto-renewable yearly subscription with a 10-day free trial. Planned launch: June 1, 2026.</p>
+            <p>Auto-renewable yearly subscription with a 7-day free trial.</p>
+            <div class="button-row">
+              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="splash" data-target-keyword="Loom Annual" data-competitor="" data-cta-position="pricing-annual">Download on App Store</a>
+            </div>
+            <p class="plan-disclaimer">The subscription renews annually unless canceled through your Apple Account settings.</p>
           </article>
 
-          <article class="plan-card unavailable" id="plan-monthly" data-plan-card data-unlock-at="2026-07-01T00:00:00-04:00">
+          <article class="plan-card" id="plan-monthly" data-plan-card>
             <div class="plan-header">
-              <div class="countdown-box">
-                <span class="countdown-label">Launches Soon</span>
-                <span class="countdown-value" id="countdown-monthly">Loading...</span>
-              </div>
               <h3>Monthly</h3>
             </div>
             <div class="price">$15 / month</div>
-            <p>Auto-renewable monthly subscription for flexible access. Planned launch: July 1, 2026.</p>
+            <p>Auto-renewable monthly subscription for flexible access.</p>
+            <div class="button-row">
+              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="splash" data-target-keyword="Loom Monthly" data-competitor="" data-cta-position="pricing-monthly">Download on App Store</a>
+            </div>
+            <p class="plan-disclaimer">The subscription renews monthly unless canceled through your Apple Account settings.</p>
           </article>
         </div>
       </div>
@@ -1970,12 +1964,12 @@
 
         <div class="grid three">
           <article class="card">
-            <h3>Available now</h3>
+            <h3>Loom on iPhone</h3>
             <p>Core Loom functionality is live on iPhone: purpose, fulfillment areas, goals, action plans, little wins, reflection, capture, and LoomAI support.</p>
           </article>
           <article class="card">
-            <h3>Subscription launch</h3>
-            <p>Subscription pricing starts with Annual on June 1, 2026 and Monthly on July 1, 2026. Founding Member Lifetime access remains the launch-window deal.</p>
+            <h3>Flexible plans</h3>
+            <p>Choose Annual with a 7-day free trial, Monthly for flexible access, or Lifetime for a one-time purchase.</p>
           </article>
           <article class="card">
             <h3>Roadmap</h3>
@@ -2053,88 +2047,6 @@
   </footer>
 
   <script>
-    const countdownTargets = [
-      {
-        id: "countdown-lifetime",
-        cardId: "plan-lifetime",
-        target: "2026-05-31T23:59:59-04:00",
-        beforePrefix: "Ends in",
-        afterText: "Offer ended",
-        removeAfterEnd: true
-      },
-      {
-        id: "countdown-annual",
-        cardId: "plan-annual",
-        target: "2026-06-01T00:00:00-04:00",
-        beforePrefix: "Available in",
-        afterText: "Available now",
-        unlockAtTarget: true
-      },
-      {
-        id: "countdown-monthly",
-        cardId: "plan-monthly",
-        target: "2026-07-01T00:00:00-04:00",
-        beforePrefix: "Available in",
-        afterText: "Available now",
-        unlockAtTarget: true
-      }
-    ];
-
-    function plural(value, unit) {
-      return value + " " + unit + (value === 1 ? "" : "s");
-    }
-
-    function formatRemaining(ms) {
-      const totalMinutes = Math.max(0, Math.floor(ms / 60000));
-      const days = Math.floor(totalMinutes / 1440);
-      const hours = Math.floor((totalMinutes % 1440) / 60);
-      const minutes = totalMinutes % 60;
-
-      if (days >= 2) {
-        return plural(days, "day");
-      }
-
-      if (days === 1) {
-        return "1 day " + plural(hours, "hour");
-      }
-
-      if (hours >= 1) {
-        return plural(hours, "hour") + " " + plural(minutes, "minute");
-      }
-
-      return plural(Math.max(1, minutes), "minute");
-    }
-
-    function updateCountdowns() {
-      const now = new Date();
-
-      countdownTargets.forEach((item) => {
-        const el = document.getElementById(item.id);
-        const card = item.cardId ? document.getElementById(item.cardId) : null;
-        const target = new Date(item.target);
-        const diff = target.getTime() - now.getTime();
-        const hasEnded = diff <= 0;
-
-        if (item.removeAfterEnd && card) {
-          card.hidden = hasEnded;
-        }
-
-        if (item.unlockAtTarget && card) {
-          card.classList.toggle("unavailable", !hasEnded);
-        }
-
-        if (!el) return;
-        el.textContent = hasEnded ? item.afterText : item.beforePrefix + " " + formatRemaining(diff);
-
-        const label = el.parentElement?.querySelector(".countdown-label");
-        if (label && item.unlockAtTarget && hasEnded) {
-          label.textContent = "Available now";
-        }
-      });
-    }
-
-    updateCountdowns();
-    window.setInterval(updateCountdowns, 60000);
 
     const carousel = document.querySelector("[data-carousel]");
     if (carousel) {
