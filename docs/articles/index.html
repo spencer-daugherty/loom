@@ -30,12 +30,62 @@
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    "url": "https://loomlife.us/articles/",
-    "name": "Articles | Loom Life Manager",
-    "description": "A filterable collection of Loom tips, guides, comparisons, and best-app articles.",
-    "dateModified": "2026-07-21",
-    "isPartOf": {"@type": "WebSite", "url": "https://loomlife.us/"}
+    "@graph": [
+      {
+        "@type": "CollectionPage",
+        "@id": "https://loomlife.us/articles/#collection",
+        "url": "https://loomlife.us/articles/",
+        "name": "Articles | Loom Life Manager",
+        "description": "A filterable collection of Loom tips, guides, comparisons, and best-app articles.",
+        "dateModified": "2026-07-21",
+        "isPartOf": {"@type": "WebSite", "@id": "https://loomlife.us/#website", "url": "https://loomlife.us/"},
+        "breadcrumb": {"@id": "https://loomlife.us/articles/#breadcrumb"},
+        "mainEntity": {"@id": "https://loomlife.us/articles/#article-list"}
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://loomlife.us/articles/#breadcrumb",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://loomlife.us/"},
+          {"@type": "ListItem", "position": 2, "name": "Articles", "item": "https://loomlife.us/articles/"}
+        ]
+      },
+      {
+        "@type": "ItemList",
+        "@id": "https://loomlife.us/articles/#article-list",
+        "name": "Loom article library",
+        "numberOfItems": 27,
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "How to plan my life", "url": "https://loomlife.us/how-to-plan-my-life/"},
+          {"@type": "ListItem", "position": 2, "name": "How to be more productive", "url": "https://loomlife.us/how-to-be-more-productive/"},
+          {"@type": "ListItem", "position": 3, "name": "Life management app", "url": "https://loomlife.us/life-management-app/"},
+          {"@type": "ListItem", "position": 4, "name": "Personal management system", "url": "https://loomlife.us/personal-management-system/"},
+          {"@type": "ListItem", "position": 5, "name": "To-do list app", "url": "https://loomlife.us/to-do-list-app/"},
+          {"@type": "ListItem", "position": 6, "name": "Goal planning app", "url": "https://loomlife.us/goal-planning-app/"},
+          {"@type": "ListItem", "position": 7, "name": "Goals app", "url": "https://loomlife.us/goals-app/"},
+          {"@type": "ListItem", "position": 8, "name": "Goal management system", "url": "https://loomlife.us/goal-management-system/"},
+          {"@type": "ListItem", "position": 9, "name": "Life management system", "url": "https://loomlife.us/life-management-system/"},
+          {"@type": "ListItem", "position": 10, "name": "Personal dashboard", "url": "https://loomlife.us/personal-dashboard/"},
+          {"@type": "ListItem", "position": 11, "name": "Life dashboard", "url": "https://loomlife.us/life-dashboard/"},
+          {"@type": "ListItem", "position": 12, "name": "Lifetime access", "url": "https://loomlife.us/founding-member/"},
+          {"@type": "ListItem", "position": 13, "name": "A better to-do list alternative", "url": "https://loomlife.us/to-do-list-alternative/"},
+          {"@type": "ListItem", "position": 14, "name": "Productivity app alternatives", "url": "https://loomlife.us/alternatives/"},
+          {"@type": "ListItem", "position": 15, "name": "Todoist alternative", "url": "https://loomlife.us/alternatives/todoist-alternative.html"},
+          {"@type": "ListItem", "position": 16, "name": "Notion alternative", "url": "https://loomlife.us/alternatives/notion-alternative.html"},
+          {"@type": "ListItem", "position": 17, "name": "TickTick alternative", "url": "https://loomlife.us/alternatives/ticktick-alternative.html"},
+          {"@type": "ListItem", "position": 18, "name": "Things 3 alternative", "url": "https://loomlife.us/alternatives/things-3-alternative.html"},
+          {"@type": "ListItem", "position": 19, "name": "Structured alternative", "url": "https://loomlife.us/alternatives/structured-alternative.html"},
+          {"@type": "ListItem", "position": 20, "name": "Sunsama alternative", "url": "https://loomlife.us/alternatives/sunsama-alternative.html"},
+          {"@type": "ListItem", "position": 21, "name": "Streaks alternative", "url": "https://loomlife.us/alternatives/streaks-alternative.html"},
+          {"@type": "ListItem", "position": 22, "name": "Best to-do list app for iPhone", "url": "https://loomlife.us/best/to-do-list-app-for-iphone.html"},
+          {"@type": "ListItem", "position": 23, "name": "Best habit tracker with goals", "url": "https://loomlife.us/best/habit-tracker-goals-app.html"},
+          {"@type": "ListItem", "position": 24, "name": "Best goal planner app for iPhone", "url": "https://loomlife.us/best/goal-planner-app-for-iphone.html"},
+          {"@type": "ListItem", "position": 25, "name": "Best life planner app for iPhone", "url": "https://loomlife.us/best/life-planner-app-for-iphone.html"},
+          {"@type": "ListItem", "position": 26, "name": "Best AI planner app for iPhone", "url": "https://loomlife.us/best/ai-planner-app-for-iphone.html"},
+          {"@type": "ListItem", "position": 27, "name": "Best productivity system app", "url": "https://loomlife.us/best/productivity-system-app.html"}
+        ]
+      }
+    ]
   }
   </script>
   <link rel="stylesheet" href="/assets/site-navigation.css">

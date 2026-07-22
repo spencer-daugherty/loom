@@ -10,39 +10,6 @@
   var ambassadorBanner = document.querySelector('[data-ambassador-banner-link]');
   var ambassadorBannerDismiss = document.querySelector('[data-ambassador-banner-dismiss]');
 
-  function addFooterDirectoryLinks() {
-    var footer = document.querySelector('footer.footer');
-    if (!footer) return;
-
-    var privacyLink = footer.querySelector('a[href$="privacy.html"]');
-    var linkHost = footer.querySelector('.footer-links') || (privacyLink ? privacyLink.parentElement : null);
-    if (!linkHost) return;
-
-    [
-      {href: '/articles/', label: 'Articles'},
-      {href: '/investor/', label: 'Investor'}
-    ].forEach(function (item) {
-      var alreadyLinked = Array.from(footer.querySelectorAll('a')).some(function (existingLink) {
-        return new URL(existingLink.href, window.location.href).pathname === item.href;
-      });
-      if (alreadyLinked) return;
-      var link = document.createElement('a');
-      link.href = item.href;
-      link.textContent = item.label;
-
-      if (linkHost.classList.contains('footer-links')) {
-        linkHost.insertBefore(link, privacyLink || linkHost.firstChild);
-      } else if (privacyLink) {
-        linkHost.insertBefore(link, privacyLink);
-        linkHost.insertBefore(document.createTextNode(' | '), privacyLink);
-      } else {
-        linkHost.appendChild(link);
-      }
-    });
-  }
-
-  addFooterDirectoryLinks();
-
   if (ambassadorBannerDismiss) {
     ambassadorBannerDismiss.addEventListener('click', function () {
       document.documentElement.classList.add('ambassador-banner-dismissed');
