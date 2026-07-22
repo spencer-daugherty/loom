@@ -1395,18 +1395,35 @@
     }
 
     #screenshots .carousel-arrow {
-      width: 58px;
-      height: 58px;
+      width: 116px;
+      height: 116px;
       border-color: rgba(29, 29, 31, 0.12);
       background: rgba(255, 255, 255, 0.94);
-      font-size: 1.7rem;
+      font-size: 3.4rem;
       box-shadow: 0 12px 30px rgba(29, 29, 31, 0.12);
     }
 
     @media (max-width: 699px) {
       #screenshots .carousel-arrow {
-        width: 54px;
-        height: 54px;
+        width: 108px;
+        height: 108px;
+      }
+
+      #screenshots .carousel-controls {
+        gap: 4px;
+      }
+
+      #screenshots .carousel-dots {
+        gap: 2px;
+      }
+
+      #screenshots .carousel-dot {
+        width: 3px;
+        height: 3px;
+      }
+
+      #screenshots .carousel-dot.is-active {
+        width: 9px;
       }
     }
 
