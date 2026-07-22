@@ -2823,9 +2823,9 @@
     }
 
     #screenshots .phone-screen {
-      inset: 6%;
+      inset: 9.143% 9.246% 9.035% 9.635%;
       border: 0;
-      border-radius: 10% / 4.6%;
+      border-radius: 15.2% 15.2% 17.2% 17.2% / 6.45% 6.45% 5.7% 5.7%;
       clip-path: none;
       box-shadow: none;
       background-size: cover;
@@ -2870,6 +2870,191 @@
       #screenshots .carousel-arrow {
         width: 54px;
         height: 54px;
+      }
+    }
+
+    /* Full-size Loom interface previews for the comparison overview */
+    #compare .comparison-intro-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: stretch;
+      gap: clamp(14px, 1.8vw, 20px);
+      margin-bottom: 16px;
+    }
+
+    #compare .comparison-card.comparison-point,
+    #compare .comparison-card.comparison-point.featured {
+      display: grid;
+      grid-template-rows: clamp(196px, 18vw, 220px) auto;
+      gap: 0;
+      min-width: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid rgba(29, 29, 31, 0.09);
+      border-radius: 26px;
+      background: #ffffff;
+      box-shadow: 0 18px 48px rgba(29, 29, 31, 0.08);
+    }
+
+    #compare .comparison-card.comparison-point.featured {
+      border-color: rgba(0, 122, 255, 0.18);
+      box-shadow: 0 20px 54px rgba(0, 122, 255, 0.12);
+    }
+
+    #compare .comparison-app-visual {
+      position: relative;
+      isolation: isolate;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      margin: 0;
+      overflow: hidden;
+      border: 0;
+      border-bottom: 1px solid rgba(29, 29, 31, 0.08);
+      border-radius: 0;
+      background: #f2f2f7;
+    }
+
+    #compare .comparison-app-visual::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      z-index: 1;
+      height: 62px;
+      background: linear-gradient(180deg, transparent, rgba(12, 12, 14, 0.34));
+      pointer-events: none;
+    }
+
+    #compare .comparison-app-screenshot {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #compare .comparison-app-visual-system .comparison-app-screenshot {
+      object-position: center 6%;
+    }
+
+    #compare .comparison-app-visual-flow .comparison-app-screenshot {
+      object-position: center 8%;
+    }
+
+    #compare .comparison-app-visual-alignment .comparison-app-screenshot {
+      object-position: center 5%;
+    }
+
+    #compare .comparison-screen-label {
+      position: absolute;
+      left: 14px;
+      bottom: 13px;
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      border-radius: 999px;
+      color: #ffffff;
+      background: rgba(16, 16, 18, 0.7);
+      font-size: 0.69rem;
+      font-weight: 800;
+      letter-spacing: 0.025em;
+      line-height: 1;
+      backdrop-filter: blur(10px);
+    }
+
+    #compare .comparison-card-copy {
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      min-width: 0;
+      padding: 19px 20px 22px;
+    }
+
+    #compare .comparison-point .comparison-kicker {
+      min-height: 26px;
+      padding: 0 9px;
+      color: #3a3a3c;
+      background: #f2f2f7;
+      font-size: 0.67rem;
+    }
+
+    #compare .comparison-point h3 {
+      margin: 12px 0 8px;
+      color: var(--ink);
+      font-size: clamp(1.3rem, 1.8vw, 1.58rem);
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+      text-wrap: balance;
+    }
+
+    #compare .comparison-point p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+      line-height: 1.52;
+      overflow-wrap: anywhere;
+    }
+
+    @media (min-width: 700px) and (max-width: 920px) {
+      #compare .comparison-intro-grid {
+        grid-template-columns: minmax(0, 1fr);
+        max-width: 780px;
+        margin-inline: auto;
+      }
+
+      #compare .comparison-card.comparison-point,
+      #compare .comparison-card.comparison-point.featured {
+        grid-template: 210px / minmax(250px, 42%) minmax(0, 1fr);
+      }
+
+      #compare .comparison-app-visual {
+        border-right: 1px solid rgba(29, 29, 31, 0.08);
+        border-bottom: 0;
+      }
+
+      #compare .comparison-card-copy {
+        justify-content: center;
+        padding: 20px 24px;
+      }
+    }
+
+    @media (max-width: 699px) {
+      #compare .comparison-intro-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 14px;
+      }
+
+      #compare .comparison-card.comparison-point,
+      #compare .comparison-card.comparison-point.featured {
+        grid-template: clamp(200px, 58vw, 236px) auto / minmax(0, 1fr);
+        align-items: stretch;
+        border-radius: 22px;
+      }
+
+      #compare .comparison-app-visual {
+        width: 100%;
+        height: 100%;
+        border-right: 0;
+        border-bottom: 1px solid rgba(29, 29, 31, 0.08);
+        border-radius: 0;
+      }
+
+      #compare .comparison-card-copy {
+        padding: 17px 18px 20px;
+      }
+
+      #compare .comparison-point h3 {
+        margin-top: 10px;
+        font-size: 1.34rem;
+      }
+
+      #compare .comparison-point p {
+        font-size: 0.91rem;
+        line-height: 1.5;
       }
     }
 
@@ -3455,15 +3640,10 @@
 
         <div class="comparison-intro-grid">
           <article class="card comparison-card comparison-point comparison-point-system featured">
-            <div class="comparison-app-visual comparison-app-visual-system" aria-hidden="true">
-              <div class="comparison-visual-stage comparison-system-stage">
-                <span class="comparison-purpose-orb">Purpose</span>
-                <span class="comparison-system-connector"></span>
-                <span class="comparison-goal-preview"><small>Goal</small><strong>Feel better</strong><i><b></b></i></span>
-                <span class="comparison-system-connector"></span>
-                <span class="comparison-win-preview"><i></i><i></i><i></i></span>
-              </div>
-            </div>
+            <figure class="comparison-app-visual comparison-app-visual-system">
+              <img class="comparison-app-screenshot" src="assets/landing/loom-home-seo.jpg" alt="Loom home screen connecting Purpose, Fulfillment, and Goals" width="331" height="720" loading="lazy" decoding="async">
+              <figcaption class="comparison-screen-label">Loom Home</figcaption>
+            </figure>
             <div class="comparison-card-copy">
               <span class="comparison-kicker">One connected system</span>
               <h3>Your whole life, connected.</h3>
@@ -3471,16 +3651,10 @@
             </div>
           </article>
           <article class="card comparison-card comparison-point comparison-point-flow">
-            <div class="comparison-app-visual comparison-app-visual-flow" aria-hidden="true">
-              <div class="comparison-visual-stage comparison-day-stage">
-                <div class="comparison-day-card">
-                  <div class="comparison-day-head"><span><small>Today</small><strong>3 priorities</strong></span><em>Jul 22</em></div>
-                  <span class="comparison-action-row"><i></i><b>Plan next move</b><em>10m</em></span>
-                  <span class="comparison-action-row"><i></i><b>Walk outside</b><em>20m</em></span>
-                  <span class="comparison-action-row"><i></i><b>Evening reflection</b><em>5m</em></span>
-                </div>
-              </div>
-            </div>
+            <figure class="comparison-app-visual comparison-app-visual-flow">
+              <img class="comparison-app-screenshot" src="assets/landing/loom-ai-seo.jpg" alt="LoomAI screen turning a goal into clear suggested actions" width="331" height="720" loading="lazy" decoding="async">
+              <figcaption class="comparison-screen-label">LoomAI Guidance</figcaption>
+            </figure>
             <div class="comparison-card-copy">
               <span class="comparison-kicker">Built-in guidance</span>
               <h3>Ready without the setup.</h3>
@@ -3488,16 +3662,10 @@
             </div>
           </article>
           <article class="card comparison-card comparison-point comparison-point-alignment">
-            <div class="comparison-app-visual comparison-app-visual-alignment" aria-hidden="true">
-              <div class="comparison-visual-stage comparison-alignment-stage">
-                <span class="comparison-alignment-score"><strong>72%</strong><small>aligned</small></span>
-                <span class="comparison-alignment-list">
-                  <i><b></b><span>Health</span><em></em></i>
-                  <i><b></b><span>Growth</span><em></em></i>
-                  <i><b></b><span>People</span><em></em></i>
-                </span>
-              </div>
-            </div>
+            <figure class="comparison-app-visual comparison-app-visual-alignment">
+              <img class="comparison-app-screenshot" src="assets/landing/loom-goals-seo.jpg" alt="Loom Goals screen showing meaningful outcomes, timelines, and progress" width="331" height="720" loading="lazy" decoding="async">
+              <figcaption class="comparison-screen-label">Goals &amp; Progress</figcaption>
+            </figure>
             <div class="comparison-card-copy">
               <span class="comparison-kicker">Purpose-led progress</span>
               <h3>Progress with meaning.</h3>
