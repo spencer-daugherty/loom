@@ -891,7 +891,7 @@
 
     .ecosystem-little-wins {
       position: relative;
-      width: 86px;
+      width: 102px;
       height: 48px;
     }
 
@@ -905,9 +905,9 @@
     }
 
     .ecosystem-little-card:nth-child(1) { left: 0; background: var(--green); }
-    .ecosystem-little-card:nth-child(2) { left: 14px; background: var(--red); }
-    .ecosystem-little-card:nth-child(3) { left: 28px; background: var(--orange); }
-    .ecosystem-little-card:nth-child(4) { left: 42px; background: var(--blue); }
+    .ecosystem-little-card:nth-child(2) { left: 24px; background: var(--red); }
+    .ecosystem-little-card:nth-child(3) { left: 48px; background: var(--orange); }
+    .ecosystem-little-card:nth-child(4) { left: 72px; background: var(--blue); }
 
     .ecosystem-little-card::after {
       content: "";
@@ -972,6 +972,10 @@
       font-size: 0.78rem;
       font-style: italic;
       line-height: 1.45;
+    }
+
+    .plan-card:not(.featured) .plan-disclaimer {
+      color: var(--muted);
     }
 
     .price {
@@ -1242,13 +1246,13 @@
     }
 
     .little-win-mini:nth-child(2) {
-      left: 16px;
+      left: 24px;
       z-index: 2;
       background: var(--green);
     }
 
     .little-win-mini:nth-child(3) {
-      left: 32px;
+      left: 48px;
       z-index: 3;
       background: var(--blue);
     }
@@ -2490,7 +2494,55 @@
     }
 
     .plan-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
       padding: 24px;
+    }
+
+    #plan-annual {
+      border-color: rgba(0, 122, 255, 0.28);
+      box-shadow: 0 24px 64px rgba(0, 122, 255, 0.12);
+    }
+
+    #plan-annual .plan-header {
+      padding-right: 112px;
+    }
+
+    .plan-popular-tag {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 11px;
+      border-radius: 999px;
+      color: #0056b3;
+      background: #e7f2ff;
+      font-size: 0.74rem;
+      font-weight: 820;
+      letter-spacing: 0.025em;
+      line-height: 1;
+    }
+
+    .pricing-action {
+      display: grid;
+      justify-items: center;
+      gap: 10px;
+      margin-top: 24px;
+      text-align: center;
+    }
+
+    .pricing-action .button {
+      min-width: min(100%, 230px);
+    }
+
+    .pricing-action .fine-print {
+      max-width: 56ch;
+      margin: 0;
+      font-size: 0.82rem;
+      line-height: 1.45;
     }
 
     .plan-card.featured {
@@ -2829,8 +2881,9 @@
       }
 
       .ecosystem-little-wins {
-        width: 70px;
-        transform: scale(0.82);
+        width: 102px;
+        transform: scale(0.72);
+        transform-origin: center;
       }
 
       .phone-shell {
@@ -3000,7 +3053,7 @@
           <a href="/articles/" data-nav-link="articles">Articles</a>
           <a href="/support.html" data-nav-link="support">Support</a>
         </nav>
-        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="header">Get Loom</a>
+        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-header&amp;mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="header">Get Loom</a>
         <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-mobile-menu" aria-label="Open navigation menu" data-site-menu-toggle>
           <span class="site-menu-icon" aria-hidden="true"></span>
           <span data-site-menu-label>Menu</span>
@@ -3017,7 +3070,7 @@
         <a href="/articles/" data-nav-link="articles">Articles</a>
         <a href="/support.html" data-nav-link="support">Support</a>
       </div>
-      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="mobile-menu">Download on the App Store</a>
+      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-mobile&amp;mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="mobile-menu">Download on the App Store</a>
     </nav>
   </header>
 
@@ -3041,7 +3094,7 @@
           </p>
           <div class="hero-actions">
             <div class="hero-button-row">
-              <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" aria-label="Download Loom Life Manager on the App Store" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="hero">
+              <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-hero&amp;mt=8" aria-label="Download Loom Life Manager on the App Store" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="hero">
                 <img
                   class="app-store-badge"
                   alt="Download on the App Store"
@@ -3492,22 +3545,17 @@
             </div>
             <div class="price">$129 <span>once</span></div>
             <p>One-time purchase with no subscription renewal. Full access to current and upcoming Loom features for life.</p>
-            <div class="button-row">
-              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Lifetime" data-competitor="" data-cta-position="pricing-lifetime">Choose lifetime</a>
-            </div>
             <p class="plan-disclaimer">Billed by Apple after purchase confirmation through the App Store.</p>
           </article>
 
           <article class="plan-card" id="plan-annual" data-plan-card>
+            <span class="plan-popular-tag">Most Popular</span>
             <div class="plan-header">
               <h3>Annual</h3>
             </div>
             <div class="price-before">$180</div>
             <div class="price">$79 / year</div>
             <p>Auto-renewable yearly subscription with a 7-day free trial.</p>
-            <div class="button-row">
-              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Annual" data-competitor="" data-cta-position="pricing-annual">Download on App Store</a>
-            </div>
             <p class="plan-disclaimer">The subscription renews annually unless canceled through your Apple Account settings.</p>
           </article>
 
@@ -3517,11 +3565,13 @@
             </div>
             <div class="price">$15 / month</div>
             <p>Auto-renewable monthly subscription for flexible access.</p>
-            <div class="button-row">
-              <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Monthly" data-competitor="" data-cta-position="pricing-monthly">Download on App Store</a>
-            </div>
             <p class="plan-disclaimer">The subscription renews monthly unless canceled through your Apple Account settings.</p>
           </article>
+        </div>
+
+        <div class="pricing-action">
+          <a class="button" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-pricing&amp;mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Annual Free Trial" data-competitor="" data-cta-position="pricing">Start Free Trial</a>
+          <p class="fine-print">The 7-day free trial applies to the Annual plan. Choose your preferred purchase option in the App Store.</p>
         </div>
       </div>
     </section>
@@ -3771,7 +3821,7 @@
           <div class="comparison-sources">
             <p><strong>Last verified:</strong> April 30, 2026. Pricing and features can change; source links point to the official or platform pages reviewed.</p>
             <div class="source-links" aria-label="Comparison sources">
-              <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="comparison_source">Loom App Store</a>
+              <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-compare-src&amp;mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="comparison_source">Loom App Store</a>
               <a href="https://www.todoist.com/pricing">Todoist pricing</a>
               <a href="https://www.todoist.com/help/articles/todoist-pro-pricing-update-in-2025-bxBvHZuJZ">Todoist price update</a>
               <a href="https://ticktick.com/">TickTick features</a>
@@ -3857,7 +3907,7 @@
         <a href="privacy.html">Privacy Policy</a>
         <a href="support.html">Support</a>
         <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Apple EULA</a>
-        <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&ct=loom_website&mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="footer">App Store</a>
+        <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-footer&amp;mt=8" data-app-store-cta data-page-type="homepage" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="footer">App Store</a>
       </div>
     </div>
   </footer>
@@ -4019,6 +4069,7 @@
         "#research .research-grid",
         "#pricing .section-head",
         "#pricing .plans",
+        "#pricing .pricing-action",
         "#compare .section-head",
         "#compare .comparison-intro-grid",
         "#compare .comparison-note",
