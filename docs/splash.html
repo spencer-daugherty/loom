@@ -502,6 +502,12 @@
     }
 
     .passion-circle {
+      --passion-active: var(--ink);
+      --passion-inactive: rgba(60, 60, 67, 0.28);
+      --passion-q1: var(--passion-inactive);
+      --passion-q2: var(--passion-inactive);
+      --passion-q3: var(--passion-inactive);
+      --passion-q4: var(--passion-inactive);
       position: relative;
       display: grid;
       place-items: center;
@@ -514,6 +520,24 @@
       font-weight: 800;
     }
 
+    .passion-circle[data-score="2"] {
+      --passion-q1: var(--passion-active);
+      --passion-q2: var(--passion-active);
+    }
+
+    .passion-circle[data-score="3"] {
+      --passion-q1: var(--passion-active);
+      --passion-q2: var(--passion-active);
+      --passion-q3: var(--passion-active);
+    }
+
+    .passion-circle[data-score="4"] {
+      --passion-q1: var(--passion-active);
+      --passion-q2: var(--passion-active);
+      --passion-q3: var(--passion-active);
+      --passion-q4: var(--passion-active);
+    }
+
     .passion-circle::before {
       content: "";
       position: absolute;
@@ -522,13 +546,13 @@
       background: conic-gradient(
         from 0deg,
         transparent 0deg 2deg,
-        var(--ink) 2deg 88deg,
+        var(--passion-q1) 2deg 88deg,
         transparent 88deg 92deg,
-        var(--ink) 92deg 178deg,
+        var(--passion-q2) 92deg 178deg,
         transparent 178deg 182deg,
-        rgba(60, 60, 67, 0.28) 182deg 268deg,
+        var(--passion-q3) 182deg 268deg,
         transparent 268deg 272deg,
-        rgba(60, 60, 67, 0.28) 272deg 358deg,
+        var(--passion-q4) 272deg 358deg,
         transparent 358deg 360deg
       );
       -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
@@ -629,10 +653,10 @@
 
     .radar-fill {
       position: absolute;
-      inset: 20%;
-      clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+      inset: 0;
+      clip-path: polygon(50% 11%, 82% 50%, 50% 70%, 32.5% 50%);
       background: conic-gradient(
-        from -90deg,
+        from 0deg,
         rgba(0, 122, 255, 0.5) 0%,
         rgba(0, 122, 255, 0.5) 7.5%,
         rgba(255, 149, 0, 0.5) 17.5%,
@@ -1720,25 +1744,25 @@
               <p class="ecosystem-eyebrow">Purpose</p>
               <h3>Your passions reveal who you are and what drives you.</h3>
               <div class="passion-row" aria-label="Purpose passion signals">
-                <div class="passion-circle">
+                <div class="passion-circle" data-score="4" role="img" aria-label="Love passion score: 4 out of 4">
                   <span>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.5-9.4-9.1C.8 8.3 3.1 4.5 7 4.5c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.9 0 6.2 3.8 4.4 7.4C19 16.5 12 21 12 21Z"></path></svg>
                     love
                   </span>
                 </div>
-                <div class="passion-circle">
+                <div class="passion-circle" data-score="3" role="img" aria-label="Vows passion score: 3 out of 4">
                   <span>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2h1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h1Zm2 0h6V8a3 3 0 0 0-6 0v2Z"></path></svg>
                     vows
                   </span>
                 </div>
-                <div class="passion-circle">
+                <div class="passion-circle" data-score="2" role="img" aria-label="Thrill passion score: 2 out of 4">
                   <span>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l0-7Z"></path></svg>
                     thrill
                   </span>
                 </div>
-                <div class="passion-circle">
+                <div class="passion-circle" data-score="4" role="img" aria-label="Hate passion score: 4 out of 4">
                   <span>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4.5 5v6.3c0 4.7 3.1 8.9 7.5 10.7 4.4-1.8 7.5-6 7.5-10.7V5L12 2Z"></path></svg>
                     hate
@@ -1772,7 +1796,7 @@
                   <span class="area-chip green">Wealth &amp; Finance</span>
                   <span class="area-custom">+ Custom Area</span>
                 </div>
-                <div class="radar" aria-label="Fulfillment radar">
+                <div class="radar" data-demo-values="78,64,40,35" role="img" aria-label="Fulfillment radar: Career and Business 78%, Health and Energy 64%, Love and Relationships 40%, Wealth and Finance 35%">
                   <div class="radar-fill" aria-hidden="true"></div>
                   <svg viewBox="0 0 220 220" aria-hidden="true">
                     <defs>
@@ -1781,10 +1805,10 @@
                       </filter>
                     </defs>
                     <polygon points="110,0 220,110 110,220 0,110" fill="none" stroke="rgba(60, 60, 67, 0.29)" stroke-width="4"></polygon>
-                    <circle cx="110" cy="44" r="7" fill="#007aff" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
-                    <circle cx="176" cy="110" r="7" fill="#ff9500" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
-                    <circle cx="110" cy="176" r="7" fill="#ff3b30" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
-                    <circle cx="44" cy="110" r="7" fill="#34c759" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle data-score="78" cx="110" cy="24.2" r="7" fill="#007aff" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle data-score="64" cx="180.4" cy="110" r="7" fill="#ff9500" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle data-score="40" cx="110" cy="154" r="7" fill="#ff3b30" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
+                    <circle data-score="35" cx="71.5" cy="110" r="7" fill="#34c759" stroke="#ffffff" stroke-width="2" filter="url(#radar-dot-glow)"></circle>
                   </svg>
                 </div>
               </div>
