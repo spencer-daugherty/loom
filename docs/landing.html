@@ -2897,6 +2897,14 @@
       width: 30px;
     }
 
+    @media (min-width: 700px) {
+      #screenshots .screenshot-copy {
+        justify-self: start;
+        width: min(100%, 440px);
+        transform: translateX(clamp(-56px, -4vw, -32px));
+      }
+    }
+
     @media (min-width: 921px) {
       #screenshots .screenshots {
         grid-template-columns: minmax(230px, 300px) minmax(0, 520px);
@@ -2906,8 +2914,7 @@
 
       #screenshots .screenshot-copy {
         justify-self: start;
-        width: 100%;
-        max-width: 520px;
+        width: min(100%, 440px);
       }
     }
 
