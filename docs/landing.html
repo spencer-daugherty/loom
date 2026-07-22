@@ -2245,6 +2245,598 @@
         width: min(82vw, 280px);
       }
     }
+
+    #compare .comparison-section-head {
+      max-width: 1040px;
+      margin-bottom: 16px;
+    }
+
+    #compare .comparison-section-head h2 {
+      max-width: 24ch;
+      font-size: clamp(2.2rem, 4vw, 3.45rem);
+    }
+
+    #compare .comparison-section-head .comparison-seo-copy {
+      max-width: 86ch;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .comparison-alternative-links {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+      font-size: 0.72rem;
+      line-height: 1;
+    }
+
+    .comparison-alternative-links > span {
+      color: var(--muted);
+      font-weight: 760;
+    }
+
+    .comparison-alternative-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 9px;
+      border: 1px solid rgba(29, 29, 31, 0.08);
+      border-radius: 999px;
+      color: #3a3a3c;
+      background: rgba(255, 255, 255, 0.82);
+      font-weight: 760;
+      text-decoration: none;
+    }
+
+    .comparison-alternative-links a:hover {
+      color: #0056b3;
+      border-color: rgba(0, 122, 255, 0.2);
+      background: #ffffff;
+    }
+
+    .comparison-card.comparison-point {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+      min-height: 0;
+      padding: 16px;
+      border-radius: 24px;
+      background: #ffffff;
+      box-shadow: 0 16px 44px rgba(29, 29, 31, 0.06);
+    }
+
+    .comparison-card.comparison-point.featured {
+      background: linear-gradient(180deg, rgba(231, 242, 255, 0.92), #ffffff 68%);
+      box-shadow: 0 18px 48px rgba(0, 122, 255, 0.1);
+    }
+
+    .comparison-card.comparison-point::before {
+      inset: 0 0 auto;
+      width: auto;
+      height: 3px;
+      opacity: 0.84;
+    }
+
+    .comparison-point-system::before {
+      background: linear-gradient(90deg, var(--blue), var(--purple));
+    }
+
+    .comparison-point-flow::before {
+      background: linear-gradient(90deg, var(--green), var(--blue));
+    }
+
+    .comparison-point-alignment::before {
+      background: linear-gradient(90deg, var(--orange), var(--red), var(--purple));
+    }
+
+    .comparison-app-visual {
+      position: relative;
+      overflow: hidden;
+      height: 96px;
+      border: 1px solid rgba(29, 29, 31, 0.07);
+      border-radius: 18px;
+      background: #f5f5f7;
+    }
+
+    .comparison-app-visual-system {
+      background:
+        radial-gradient(circle at 18% 20%, rgba(0, 122, 255, 0.16), transparent 34%),
+        linear-gradient(145deg, #f8fbff, #f5f5f7);
+    }
+
+    .comparison-app-visual-flow {
+      background:
+        radial-gradient(circle at 84% 12%, rgba(46, 167, 109, 0.14), transparent 32%),
+        linear-gradient(145deg, #f8fcfa, #f5f5f7);
+    }
+
+    .comparison-app-visual-alignment {
+      background:
+        radial-gradient(circle at 14% 78%, rgba(255, 138, 61, 0.16), transparent 34%),
+        linear-gradient(145deg, #fffaf7, #f5f5f7);
+    }
+
+    .comparison-visual-stage {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      transform-origin: center;
+    }
+
+    .comparison-system-stage {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: max-content;
+    }
+
+    .comparison-purpose-orb {
+      display: grid;
+      place-items: center;
+      width: 52px;
+      height: 52px;
+      border-radius: 18px;
+      color: #ffffff;
+      background: linear-gradient(145deg, var(--blue), var(--purple));
+      box-shadow: 0 10px 24px rgba(0, 122, 255, 0.22);
+      font-size: 0.62rem;
+      font-weight: 840;
+    }
+
+    .comparison-system-connector {
+      position: relative;
+      width: 16px;
+      height: 2px;
+      border-radius: 99px;
+      background: rgba(0, 122, 255, 0.28);
+    }
+
+    .comparison-system-connector::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -1px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--blue);
+      transform: translateY(-50%);
+    }
+
+    .comparison-goal-preview {
+      display: grid;
+      align-content: center;
+      width: 92px;
+      min-height: 64px;
+      padding: 8px 9px;
+      border: 1px solid rgba(29, 29, 31, 0.07);
+      border-radius: 14px;
+      background: #ffffff;
+      box-shadow: 0 9px 24px rgba(29, 29, 31, 0.09);
+    }
+
+    .comparison-goal-preview small {
+      color: var(--blue);
+      font-size: 0.48rem;
+      font-weight: 830;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .comparison-goal-preview strong {
+      margin: 2px 0 6px;
+      color: var(--ink);
+      font-size: 0.66rem;
+      line-height: 1.1;
+    }
+
+    .comparison-goal-preview > i {
+      overflow: hidden;
+      height: 4px;
+      border-radius: 99px;
+      background: #e8e8ed;
+    }
+
+    .comparison-goal-preview > i > b {
+      display: block;
+      width: 72%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--blue), var(--green));
+    }
+
+    .comparison-win-preview {
+      position: relative;
+      width: 58px;
+      height: 54px;
+    }
+
+    .comparison-win-preview > i {
+      position: absolute;
+      top: 5px;
+      width: 30px;
+      height: 44px;
+      border-radius: 7px;
+      box-shadow: 0 8px 18px rgba(29, 29, 31, 0.12);
+    }
+
+    .comparison-win-preview > i:nth-child(1) {
+      left: 0;
+      background: var(--purple);
+    }
+
+    .comparison-win-preview > i:nth-child(2) {
+      left: 13px;
+      background: var(--green);
+    }
+
+    .comparison-win-preview > i:nth-child(3) {
+      left: 26px;
+      background: var(--orange);
+    }
+
+    .comparison-win-preview > i::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      z-index: 2;
+      width: 11px;
+      height: 11px;
+      border: 1.2px solid rgba(255, 255, 255, 0.92);
+      border-radius: 1px;
+      transform: translate(-50%, -50%) rotate(45deg);
+    }
+
+    .comparison-day-stage {
+      width: 242px;
+    }
+
+    .comparison-day-card {
+      padding: 8px 10px;
+      border: 1px solid rgba(29, 29, 31, 0.07);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 10px 28px rgba(29, 29, 31, 0.09);
+    }
+
+    .comparison-day-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .comparison-day-head > span {
+      display: grid;
+      gap: 1px;
+    }
+
+    .comparison-day-head small {
+      color: var(--green);
+      font-size: 0.48rem;
+      font-weight: 840;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .comparison-day-head strong {
+      font-size: 0.68rem;
+      line-height: 1;
+    }
+
+    .comparison-day-head em,
+    .comparison-action-row em {
+      color: #8e8e93;
+      font-size: 0.48rem;
+      font-style: normal;
+      font-weight: 720;
+    }
+
+    .comparison-action-row {
+      display: grid;
+      grid-template-columns: 13px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      min-height: 16px;
+      border-top: 1px solid rgba(29, 29, 31, 0.055);
+    }
+
+    .comparison-action-row > i {
+      width: 9px;
+      height: 9px;
+      border: 1.5px solid var(--blue);
+      border-radius: 50%;
+    }
+
+    .comparison-action-row:nth-of-type(2) > i {
+      border-color: var(--green);
+    }
+
+    .comparison-action-row:nth-of-type(3) > i {
+      border-color: var(--orange);
+    }
+
+    .comparison-action-row > b {
+      overflow: hidden;
+      color: #3a3a3c;
+      font-size: 0.55rem;
+      font-weight: 720;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .comparison-alignment-stage {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 236px;
+    }
+
+    .comparison-alignment-score {
+      display: grid;
+      flex: 0 0 auto;
+      place-items: center;
+      align-content: center;
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle closest-side, #ffffff 76%, transparent 78% 99%),
+        conic-gradient(var(--green) 0 46%, var(--blue) 46% 72%, #e8e8ed 72% 100%);
+      box-shadow: 0 9px 24px rgba(29, 29, 31, 0.08);
+    }
+
+    .comparison-alignment-score strong {
+      font-size: 0.82rem;
+      line-height: 1;
+    }
+
+    .comparison-alignment-score small {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 0.46rem;
+      font-weight: 760;
+    }
+
+    .comparison-alignment-list {
+      display: grid;
+      gap: 7px;
+      width: 150px;
+    }
+
+    .comparison-alignment-list > i {
+      display: grid;
+      grid-template-columns: 7px 42px minmax(0, 1fr);
+      align-items: center;
+      gap: 6px;
+      font-style: normal;
+    }
+
+    .comparison-alignment-list > i > b {
+      width: 7px;
+      height: 7px;
+      border-radius: 3px;
+      background: var(--blue);
+    }
+
+    .comparison-alignment-list > i:nth-child(2) > b {
+      background: var(--purple);
+    }
+
+    .comparison-alignment-list > i:nth-child(3) > b {
+      background: var(--orange);
+    }
+
+    .comparison-alignment-list > i > span {
+      color: #3a3a3c;
+      font-size: 0.52rem;
+      font-weight: 720;
+    }
+
+    .comparison-alignment-list > i > em {
+      position: relative;
+      overflow: hidden;
+      height: 5px;
+      border-radius: 99px;
+      background: #e8e8ed;
+    }
+
+    .comparison-alignment-list > i > em::after {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 78%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .comparison-alignment-list > i:nth-child(2) > em::after {
+      width: 64%;
+      background: var(--purple);
+    }
+
+    .comparison-alignment-list > i:nth-child(3) > em::after {
+      width: 52%;
+      background: var(--orange);
+    }
+
+    .comparison-card-copy {
+      align-self: start;
+    }
+
+    .comparison-point .comparison-kicker {
+      min-height: 24px;
+      padding: 0 8px;
+      color: #3a3a3c;
+      background: #f5f5f7;
+      font-size: 0.64rem;
+      letter-spacing: 0.055em;
+    }
+
+    .comparison-point h3 {
+      margin: 8px 0 5px;
+      font-size: 1.14rem;
+      line-height: 1.15;
+    }
+
+    .comparison-point p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.42;
+    }
+
+    #compare .comparison-note {
+      margin-bottom: 14px;
+      font-size: 0.84rem;
+      line-height: 1.45;
+      text-align: center;
+    }
+
+    @media (min-width: 700px) and (max-width: 920px) {
+      #compare .comparison-intro-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .comparison-card.comparison-point {
+        gap: 11px;
+        padding: 13px;
+      }
+
+      .comparison-app-visual {
+        height: 88px;
+      }
+
+      .comparison-app-visual .comparison-visual-stage {
+        transform: translate(-50%, -50%) scale(0.72);
+      }
+
+      .comparison-point h3 {
+        font-size: 1rem;
+      }
+
+      .comparison-point p {
+        font-size: 0.77rem;
+        line-height: 1.38;
+      }
+    }
+
+    @media (max-width: 699px) {
+      #compare .comparison-section-head {
+        justify-items: start;
+        margin-bottom: 13px;
+        text-align: left;
+      }
+
+      #compare .comparison-section-head h2,
+      #compare .comparison-section-head .comparison-seo-copy {
+        margin-inline: 0;
+      }
+
+      #compare .comparison-section-head h2 {
+        max-width: 18ch;
+        font-size: clamp(1.9rem, 9vw, 2.45rem);
+        line-height: 1.03;
+      }
+
+      #compare .comparison-section-head .comparison-seo-copy {
+        font-size: 0.84rem;
+        line-height: 1.4;
+      }
+
+      .comparison-alternative-links {
+        justify-content: flex-start;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        max-width: 100%;
+        padding: 1px 1px 4px;
+        scrollbar-width: none;
+      }
+
+      .comparison-alternative-links::-webkit-scrollbar {
+        display: none;
+      }
+
+      .comparison-alternative-links > * {
+        flex: 0 0 auto;
+      }
+
+      #compare .comparison-intro-grid {
+        gap: 9px;
+        margin-bottom: 12px;
+      }
+
+      .comparison-card.comparison-point {
+        grid-template: 1fr / 94px minmax(0, 1fr);
+        align-items: center;
+        gap: 12px;
+        padding: 11px;
+        border-radius: 19px;
+      }
+
+      .comparison-app-visual {
+        width: 100%;
+        height: 106px;
+        border-radius: 14px;
+      }
+
+      .comparison-app-visual .comparison-visual-stage {
+        transform: translate(-50%, -50%) scale(0.36);
+      }
+
+      .comparison-point .comparison-kicker {
+        min-height: 20px;
+        padding-inline: 6px;
+        font-size: 0.56rem;
+      }
+
+      .comparison-point h3 {
+        margin: 6px 0 4px;
+        font-size: 0.98rem;
+      }
+
+      .comparison-point p {
+        font-size: 0.75rem;
+        line-height: 1.34;
+      }
+
+      #compare .comparison-note {
+        margin-bottom: 12px;
+        font-size: 0.78rem;
+        line-height: 1.38;
+        text-align: left;
+      }
+    }
+
+    @media (max-width: 420px) {
+      .comparison-card.comparison-point {
+        grid-template-columns: 78px minmax(0, 1fr);
+        gap: 9px;
+        padding: 10px;
+      }
+
+      .comparison-app-visual {
+        height: 100px;
+      }
+
+      .comparison-app-visual .comparison-visual-stage {
+        transform: translate(-50%, -50%) scale(0.3);
+      }
+
+      .comparison-point h3 {
+        font-size: 0.92rem;
+      }
+
+      .comparison-point p {
+        font-size: 0.71rem;
+      }
+    }
+
   </style>
   <link rel="stylesheet" href="/assets/site-navigation.css">
 </head>
@@ -2790,61 +3382,78 @@
 
     <section id="compare">
       <div class="shell">
-        <div class="section-head">
+        <div class="section-head comparison-section-head">
           <div>
             <h2>See why Loom is the better life-management system.</h2>
-            <p>
-              If you are comparing productivity apps or searching for a Todoist alternative, Notion alternative, TickTick alternative, Things 3 alternative, Structured alternative, Sunsama alternative, or Streaks habit tracker alternative, Loom is built for the higher-intent problem: turning purpose, goals, habits, tasks, capture, reflection, health signals, and LoomAI into one practical iPhone system.
-            </p>
+            <p class="comparison-seo-copy">Comparing productivity apps? Loom connects purpose, goals, habits, tasks, reflection, health signals, and LoomAI in one practical iPhone life-management system.</p>
+            <nav class="comparison-alternative-links" aria-label="Compare Loom with productivity app alternatives">
+              <span>Compare Loom:</span>
+              <a href="/alternatives/todoist-alternative.html">Todoist</a>
+              <a href="/alternatives/notion-alternative.html">Notion</a>
+              <a href="/alternatives/ticktick-alternative.html">TickTick</a>
+              <a href="/alternatives/things-3-alternative.html">Things 3</a>
+              <a href="/alternatives/structured-alternative.html">Structured</a>
+              <a href="/alternatives/sunsama-alternative.html">Sunsama</a>
+              <a href="/alternatives/streaks-alternative.html">Streaks</a>
+            </nav>
           </div>
         </div>
 
         <div class="comparison-intro-grid">
-          <article class="card comparison-card featured">
-            <div class="comparison-card-top">
-              <span class="comparison-card-icon" aria-hidden="true">1</span>
-              <span class="comparison-kicker">Best overall fit</span>
+          <article class="card comparison-card comparison-point comparison-point-system featured">
+            <div class="comparison-app-visual comparison-app-visual-system" aria-hidden="true">
+              <div class="comparison-visual-stage comparison-system-stage">
+                <span class="comparison-purpose-orb">Purpose</span>
+                <span class="comparison-system-connector"></span>
+                <span class="comparison-goal-preview"><small>Goal</small><strong>Feel better</strong><i><b></b></i></span>
+                <span class="comparison-system-connector"></span>
+                <span class="comparison-win-preview"><i></i><i></i><i></i></span>
+              </div>
             </div>
-            <h3>Built for the full life loop.</h3>
-            <p>Loom connects purpose, fulfillment areas, goals, Action Plans, Little Wins, capture, reflection, health signals, and LoomAI in one repeatable structure.</p>
-            <div class="comparison-pill-row" aria-label="Loom strengths">
-              <span>Purpose</span>
-              <span>Goals</span>
-              <span>Habits</span>
-              <span>LoomAI</span>
-              <span>Reflection</span>
-            </div>
-          </article>
-          <article class="card comparison-card">
-            <div class="comparison-card-top">
-              <span class="comparison-card-icon" aria-hidden="true">2</span>
-              <span class="comparison-kicker">Less setup</span>
-            </div>
-            <h3>Guidance without building your own workspace.</h3>
-            <p>Instead of designing databases, filters, labels, or manual dashboards, Loom gives you a ready structure for turning intent into daily action.</p>
-            <div class="comparison-pill-row" aria-label="Setup advantages">
-              <span>No templates</span>
-              <span>No database build</span>
-              <span>Daily flow</span>
+            <div class="comparison-card-copy">
+              <span class="comparison-kicker">One connected system</span>
+              <h3>Your whole life, connected.</h3>
+              <p>Purpose, life areas, goals, Action Plans, Little Wins, reflection, health, and LoomAI move together.</p>
             </div>
           </article>
-          <article class="card comparison-card">
-            <div class="comparison-card-top">
-              <span class="comparison-card-icon" aria-hidden="true">3</span>
-              <span class="comparison-kicker">When Loom wins</span>
+          <article class="card comparison-card comparison-point comparison-point-flow">
+            <div class="comparison-app-visual comparison-app-visual-flow" aria-hidden="true">
+              <div class="comparison-visual-stage comparison-day-stage">
+                <div class="comparison-day-card">
+                  <div class="comparison-day-head"><span><small>Today</small><strong>3 priorities</strong></span><em>Jul 22</em></div>
+                  <span class="comparison-action-row"><i></i><b>Plan next move</b><em>10m</em></span>
+                  <span class="comparison-action-row"><i></i><b>Walk outside</b><em>20m</em></span>
+                  <span class="comparison-action-row"><i></i><b>Evening reflection</b><em>5m</em></span>
+                </div>
+              </div>
             </div>
-            <h3>Choose Loom when progress needs meaning.</h3>
-            <p>Loom is strongest when tasks, habits, and plans need to stay connected to the person you want to become, not just the next thing due.</p>
-            <div class="comparison-pill-row" aria-label="Decision advantages">
-              <span>Life areas</span>
-              <span>Little Wins</span>
-              <span>Next best move</span>
+            <div class="comparison-card-copy">
+              <span class="comparison-kicker">Built-in guidance</span>
+              <h3>Ready without the setup.</h3>
+              <p>Skip databases, templates, and manual dashboards. Follow a guided daily flow from intent to action.</p>
+            </div>
+          </article>
+          <article class="card comparison-card comparison-point comparison-point-alignment">
+            <div class="comparison-app-visual comparison-app-visual-alignment" aria-hidden="true">
+              <div class="comparison-visual-stage comparison-alignment-stage">
+                <span class="comparison-alignment-score"><strong>72%</strong><small>aligned</small></span>
+                <span class="comparison-alignment-list">
+                  <i><b></b><span>Health</span><em></em></i>
+                  <i><b></b><span>Growth</span><em></em></i>
+                  <i><b></b><span>People</span><em></em></i>
+                </span>
+              </div>
+            </div>
+            <div class="comparison-card-copy">
+              <span class="comparison-kicker">Purpose-led progress</span>
+              <h3>Progress with meaning.</h3>
+              <p>Keep tasks and habits tied to your life areas, goals, and the person you want to become.</p>
             </div>
           </article>
         </div>
 
         <p class="comparison-note">
-          This comparison focuses on first-class product positioning and officially listed features. Several competitors can approximate missing workflows through templates, recurring tasks, databases, or manual setup, but Loom makes the connected system the default.
+          Compared on first-class features. Other apps may approximate missing workflows through templates or manual setup; Loom makes the connected system the default.
         </p>
 
         <div class="comparison-table-card">
