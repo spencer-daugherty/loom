@@ -3689,6 +3689,20 @@
       width: 30px;
     }
 
+    @media (min-width: 921px) {
+      #screenshots .screenshots {
+        grid-template-columns: minmax(230px, 300px) minmax(0, 520px);
+        justify-content: center;
+        column-gap: clamp(28px, 4vw, 48px);
+      }
+
+      #screenshots .screenshot-copy {
+        justify-self: start;
+        width: 100%;
+        max-width: 520px;
+      }
+    }
+
     @media (max-width: 699px) {
       #compare .comparison-section-subtitle {
         margin-inline: 0;
