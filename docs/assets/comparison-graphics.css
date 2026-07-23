@@ -39,6 +39,7 @@
 #compare .comparison-simple-graphic {
   position: relative;
   isolation: isolate;
+  box-sizing: border-box;
   width: 104px;
   height: 116px;
   overflow: hidden;
@@ -48,32 +49,41 @@
 }
 
 /* Home: three standard icon rows and the two primary controls. */
+#compare .comparison-system-graphic {
+  display: grid;
+  grid-template: repeat(3, minmax(0, 1fr)) 16px / minmax(0, 1fr) 16px;
+  gap: 4px;
+  padding: 8px;
+}
+
 #compare .mini-home-card {
-  position: absolute;
-  right: 7%;
-  left: 7%;
-  height: 18%;
+  position: static;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  grid-column: 1 / -1;
+  padding: 0 6px;
   border-radius: 8px;
   background: #ffffff;
 }
 
 #compare .mini-home-purpose {
-  top: 7%;
+  grid-row: 1;
 }
 
 #compare .mini-home-fulfillment {
-  top: 29%;
+  grid-row: 2;
 }
 
 #compare .mini-home-goals {
-  top: 51%;
+  grid-row: 3;
 }
 
 #compare .mini-home-icon {
-  position: absolute;
-  top: 50%;
-  left: 10%;
-  width: 12px;
+  position: static;
+  flex: 0 0 10px;
+  width: 10px;
   color: #007aff;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   font-size: 10px;
@@ -81,7 +91,6 @@
   font-weight: 700;
   line-height: 1;
   text-align: center;
-  transform: translateY(-52%);
 }
 
 #compare .mini-home-fulfillment .mini-home-icon {
@@ -93,56 +102,50 @@
 }
 
 #compare .mini-home-card b {
-  position: absolute;
-  top: 50%;
-  left: 29%;
+  position: static;
   color: #1d1d1f;
   font-size: 6px;
   font-weight: 700;
   line-height: 1;
-  transform: translateY(-50%);
 }
 
 #compare .mini-home-capture {
-  position: absolute;
-  bottom: 7%;
-  left: 7%;
-  width: 63%;
-  height: 13%;
+  position: static;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  grid-column: 1;
+  grid-row: 4;
+  padding: 0 6px;
   border-radius: 999px;
   background: #ffffff;
 }
 
 #compare .mini-home-capture i {
-  position: absolute;
-  top: 50%;
-  left: 12%;
+  position: static;
   color: #007aff;
   font-size: 10px;
   font-style: normal;
   font-weight: 600;
   line-height: 1;
-  transform: translateY(-54%);
 }
 
 #compare .mini-home-capture b {
-  position: absolute;
-  top: 50%;
-  left: 34%;
-  width: 30%;
+  position: static;
+  width: 22px;
   height: 2px;
   border-radius: 999px;
   background: #c7c7cc;
-  transform: translateY(-50%);
 }
 
 #compare .mini-home-play {
-  position: absolute;
-  right: 7%;
-  bottom: 6%;
+  position: static;
   display: grid;
-  width: 15%;
-  aspect-ratio: 1;
+  width: 16px;
+  height: 16px;
+  grid-column: 2;
+  grid-row: 4;
   place-items: center;
   border-radius: 50%;
   background: #007aff;
@@ -153,29 +156,33 @@
 }
 
 /* Action Plans: two flat groups, one action, two familiar status icons. */
+#compare .comparison-guidance-graphic {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 8px;
+}
+
 #compare .mini-action-group {
   --group-accent: #007aff;
-  position: absolute;
-  right: 7%;
-  left: 7%;
-  height: 38%;
+  position: static;
+  display: grid;
+  min-height: 0;
+  grid-template-rows: 10px minmax(0, 1fr);
+  gap: 4px;
+  padding: 4px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--group-accent) 10%, white);
 }
 
-#compare .mini-action-group-blue {
-  top: 9%;
-}
-
 #compare .mini-action-group-orange {
   --group-accent: #ff9500;
-  top: 53%;
 }
 
 #compare .mini-action-group-title {
-  position: absolute;
-  top: 11%;
-  left: 9%;
+  position: static;
+  align-self: center;
+  padding-left: 3px;
   color: var(--group-accent);
   font-size: 6px;
   font-weight: 700;
@@ -183,45 +190,41 @@
 }
 
 #compare .mini-action-item {
-  position: absolute;
-  right: 7%;
-  bottom: 10%;
-  left: 7%;
-  height: 57%;
+  position: static;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 0 5px;
   border-radius: 7px;
   background: #ffffff;
 }
 
 #compare .mini-action-check {
-  position: absolute;
-  top: 50%;
-  left: 8%;
+  position: static;
+  flex: 0 0 auto;
   color: var(--group-accent);
   font-size: 9px;
   font-style: normal;
   font-weight: 700;
   line-height: 1;
-  transform: translateY(-50%);
 }
 
 #compare .mini-action-text {
-  position: absolute;
-  top: 50%;
-  left: 26%;
-  width: 28%;
+  position: static;
+  width: auto;
   height: 3px;
+  flex: 1 1 auto;
   border-radius: 999px;
   background: #c7c7cc;
-  transform: translateY(-50%);
 }
 
 #compare .mini-action-attributes {
-  position: absolute;
-  top: 50%;
-  right: 8%;
+  position: static;
   display: flex;
+  flex: 0 0 auto;
   gap: 5px;
-  transform: translateY(-50%);
 }
 
 #compare .mini-action-attributes em {
@@ -239,6 +242,14 @@
 }
 
 /* Fulfillment Insights: three simple rising stacked columns. */
+#compare .comparison-progress-graphic {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 14px 15px;
+}
+
 #compare .mini-insight-title {
   position: absolute;
   top: 9%;
@@ -251,36 +262,33 @@
 
 #compare .mini-insight-grid {
   position: absolute;
-  right: 9%;
-  bottom: 13%;
-  left: 9%;
+  right: 13%;
+  bottom: 14px;
+  left: 13%;
   height: 1px;
   background: #c7c7cc;
 }
 
 #compare .mini-insight-bar {
-  position: absolute;
-  bottom: 14%;
+  position: static;
   display: flex;
-  width: 17%;
+  width: 18px;
   overflow: hidden;
+  flex: 0 1 18px;
   flex-direction: column-reverse;
   border-radius: 6px 6px 2px 2px;
   background: #ffffff;
 }
 
 #compare .mini-insight-bar-one {
-  left: 13%;
   height: 33%;
 }
 
 #compare .mini-insight-bar-two {
-  left: 42%;
   height: 50%;
 }
 
 #compare .mini-insight-bar-three {
-  left: 71%;
   height: 68%;
 }
 
@@ -339,7 +347,45 @@
     border-radius: 21px;
   }
 
-  #compare .mini-home-card b,
+  #compare .comparison-system-graphic {
+    grid-template: repeat(3, minmax(0, 1fr)) 15px / minmax(0, 1fr) 15px;
+    gap: 4px;
+    padding: 7px;
+  }
+
+  #compare .mini-home-card,
+  #compare .mini-home-capture {
+    gap: 4px;
+    padding: 0 4px;
+  }
+
+  #compare .mini-home-play {
+    width: 15px;
+    height: 15px;
+  }
+
+  #compare .comparison-guidance-graphic {
+    gap: 6px;
+    padding: 7px;
+  }
+
+  #compare .mini-action-group {
+    padding: 4px;
+  }
+
+  #compare .mini-action-item {
+    gap: 4px;
+    padding: 0 4px;
+  }
+
+  #compare .mini-action-attributes {
+    gap: 3px;
+  }
+
+  #compare .mini-home-card b {
+    font-size: 4.7px;
+  }
+
   #compare .mini-action-group-title,
   #compare .mini-insight-title {
     font-size: 5.3px;
