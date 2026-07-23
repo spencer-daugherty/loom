@@ -73,12 +73,12 @@
           {
             "@type": "Question",
             "name": "How are ambassador rewards paid?",
-            "acceptedAnswer": {"@type": "Answer", "text": "Ambassadors are paid one fixed reward for each qualifying referral: $3 for a monthly referral, $15 for an annual referral, and $30 for a lifetime referral. The annual payment becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional payments, and every purchase is subject to the 30-day validation period."}
+            "acceptedAnswer": {"@type": "Answer", "text": "Ambassadors are paid one fixed reward for each qualifying referral: $3* for a monthly referral, $15* for an annual referral, and $30* for a lifetime referral. The asterisk refers to the commission terms on this page. The annual payment becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional payments, and every purchase is subject to the 30-day validation period."}
           },
           {
             "@type": "Question",
             "name": "How is lifetime access handled?",
-            "acceptedAnswer": {"@type": "Answer", "text": "The ambassador's unique lifetime code gives an eligible customer 10% off the one-time purchase. A qualifying lifetime referral pays the ambassador a fixed one-time $30 reward after the 30-day refund and chargeback review period."}
+            "acceptedAnswer": {"@type": "Answer", "text": "The ambassador's unique lifetime code gives an eligible customer 10% off the one-time purchase. A qualifying lifetime referral pays the ambassador a fixed one-time $30* reward after the 30-day refund and chargeback review period. The asterisk refers to the commission terms on this page."}
           },
           {
             "@type": "Question",
@@ -311,22 +311,14 @@
     }
     .reward-payout { display: block; margin-bottom: 7px; color: var(--ink); font-size: 2.35rem; font-weight: 870; line-height: 1; }
     .reward-paid-label { display: block; margin-bottom: 8px; color: var(--green); font-size: 0.74rem; font-weight: 840; letter-spacing: 0.05em; text-transform: uppercase; }
+    .terms-marker { color: inherit; text-decoration: none; }
+    .terms-marker:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
+    sup { line-height: 0; }
     .reward-label { min-height: 3.1em; margin-bottom: 22px; color: var(--muted); font-size: 0.92rem; }
     .reward-audience { margin-bottom: 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
     .reward-audience span, .reward-audience strong { display: block; }
     .reward-audience span { margin-bottom: 3px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
     .reward-audience strong { color: var(--ink); font-size: 0.94rem; }
-    .program-disclaimer {
-      margin-top: 16px;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.64);
-    }
-    .program-disclaimer summary { padding: 17px 20px; font-size: 0.92rem; }
-    .disclaimer-copy { max-width: 92ch; padding: 0 46px 18px 20px; color: var(--muted); font-size: 0.82rem; line-height: 1.6; }
-    .disclaimer-copy p { margin-bottom: 9px; }
-    .disclaimer-copy p:last-child { margin-bottom: 0; }
 
     .criteria-layout { display: grid; grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr); gap: 42px; align-items: start; }
     .criteria-list { display: grid; gap: 0; border-top: 1px solid var(--line); }
@@ -355,6 +347,9 @@
     .final-cta .button-row { justify-content: center; }
     .fine { color: var(--muted); font-size: 0.86rem; }
     .footer { padding: 38px 0 50px; color: var(--muted); background: var(--paper); }
+    .commission-terms { margin-top: 34px; padding-top: 28px; border-top: 1px solid var(--line); }
+    .commission-terms p { max-width: 104ch; margin-bottom: 0; color: var(--muted); font-size: 0.78rem; line-height: 1.65; }
+    .commission-terms strong { color: var(--ink); }
     .footer-grid { display: flex; justify-content: space-between; gap: 24px; }
     .footer-links { display: flex; flex-wrap: wrap; gap: 16px; font-weight: 720; }
     .footer a { color: var(--ink); }
@@ -583,9 +578,9 @@
     <div class="numbers" aria-label="Ambassador program highlights">
       <div class="shell numbers-grid">
         <div class="number"><span class="number-kicker">Your audience</span><strong>10% off</strong><span>eligible monthly, annual, or lifetime access</span></div>
-        <div class="number"><span class="number-kicker">Monthly referral</span><strong>$3</strong><span>one-time commission per paid referral</span></div>
-        <div class="number"><span class="number-kicker">Annual referral</span><strong>$15</strong><span>one-time commission per paid referral</span></div>
-        <div class="number"><span class="number-kicker">Lifetime referral</span><strong>$30</strong><span>one-time commission per paid referral</span></div>
+        <div class="number"><span class="number-kicker">Monthly referral</span><strong>$3<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup></strong><span>one-time commission per paid referral</span></div>
+        <div class="number"><span class="number-kicker">Annual referral</span><strong>$15<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup></strong><span>one-time commission per paid referral</span></div>
+        <div class="number"><span class="number-kicker">Lifetime referral</span><strong>$30<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup></strong><span>one-time commission per paid referral</span></div>
       </div>
     </div>
 
@@ -625,32 +620,25 @@
           <article class="reward-card">
             <div class="reward-head"><h3>Monthly</h3><span class="reward-type">Subscription</span></div>
             <span class="reward-paid-label">You are paid</span>
-            <strong class="reward-payout">$3</strong>
+            <strong class="reward-payout">$3<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup></strong>
             <p class="reward-label">A fixed one-time reward for each qualifying monthly referral. No renewal rewards.</p>
             <p class="reward-audience"><span>Audience pays</span><strong>$13.50 each month for the first 12 payments</strong></p>
           </article>
           <article class="reward-card">
             <div class="reward-head"><h3>Annual</h3><span class="reward-type">Subscription</span></div>
             <span class="reward-paid-label">You are paid</span>
-            <strong class="reward-payout">$15</strong>
+            <strong class="reward-payout">$15<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup></strong>
             <p class="reward-label">A fixed one-time reward when the annual purchase completes after the 7-day free trial.</p>
             <p class="reward-audience"><span>Audience pays</span><strong>$71.10 for the first annual term</strong></p>
           </article>
           <article class="reward-card">
             <div class="reward-head"><h3>Lifetime</h3><span class="reward-type">One-time</span></div>
             <span class="reward-paid-label">You are paid</span>
-            <strong class="reward-payout">$30</strong>
+            <strong class="reward-payout">$30<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup></strong>
             <p class="reward-label">A fixed one-time reward for each qualifying lifetime referral.</p>
             <p class="reward-audience"><span>Audience pays</span><strong>$116.10 once</strong></p>
           </article>
         </div>
-        <details class="program-disclaimer">
-          <summary>Payment details and qualifications</summary>
-          <div class="disclaimer-copy">
-            <p>Ambassadors are paid one fixed reward for each qualifying referral: $3 for a monthly referral, $15 for an annual referral, and $30 for a lifetime referral. Annual free trials must convert to a paid purchase before the payment becomes eligible. Monthly and annual renewals do not earn additional payments.</p>
-            <p>Purchases are reviewed for 30 days. Refunded, reversed, fraudulent, self-referred, untracked, or otherwise ineligible purchases do not earn a reward. Approved balances are distributed on a monthly payout schedule after the ambassador reaches a $50 minimum balance. The operative program terms provided to approved ambassadors control if they differ from this summary.</p>
-          </div>
-        </details>
       </div>
     </section>
 
@@ -718,11 +706,11 @@
           </details>
           <details>
             <summary>How are ambassador rewards paid?</summary>
-            <div class="faq-copy">Ambassadors are paid one fixed reward for each qualifying referral: $3 for a monthly referral, $15 for an annual referral, and $30 for a lifetime referral. The annual payment becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional payments, and every purchase is subject to the 30-day validation period.</div>
+            <div class="faq-copy">Ambassadors are paid one fixed reward for each qualifying referral: $3<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup> for a monthly referral, $15<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup> for an annual referral, and $30<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup> for a lifetime referral. The annual payment becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional payments, and every purchase is subject to the 30-day validation period.</div>
           </details>
           <details>
             <summary>How is lifetime access handled?</summary>
-            <div class="faq-copy">The ambassador's unique lifetime code gives an eligible customer 10% off the one-time purchase. A qualifying lifetime referral pays the ambassador a fixed one-time $30 reward after the 30-day refund and chargeback review period.</div>
+            <div class="faq-copy">The ambassador's unique lifetime code gives an eligible customer 10% off the one-time purchase. A qualifying lifetime referral pays the ambassador a fixed one-time $30<sup><a class="terms-marker" href="#commission-terms" aria-label="See commission terms">*</a></sup> reward after the 30-day refund and chargeback review period.</div>
           </details>
           <details>
             <summary>Do I need a large social following?</summary>
@@ -920,6 +908,9 @@
     <div class="shell footer-grid">
       <div><strong>Loom Life Manager</strong><p class="fine">A connected life-management system for iPhone.</p></div>
       <div class="footer-links"><a href="../">Home</a><a href="../articles/">Articles</a><a href="../investor/">Investor</a><a href="../privacy.html">Privacy</a><a href="../support.html">Support</a><a href="mailto:spencer@loomlife.us">Contact</a></div>
+    </div>
+    <div class="shell commission-terms" id="commission-terms">
+      <p><strong>*Commission terms:</strong> The displayed monthly, annual, and lifetime commissions are fixed one-time payments for each qualifying paid referral. An annual referral qualifies only after the 7-day free trial converts to a paid purchase. Monthly and annual renewals do not earn additional commissions. Purchases are reviewed for 30 days; refunded, reversed, fraudulent, self-referred, untracked, or otherwise ineligible purchases do not qualify. Approved balances are distributed on a monthly payout schedule after the ambassador reaches a $50 minimum balance. The audience offer provides 10% off eligible monthly or annual payments during the customer's first 12 months and 10% off a qualifying one-time lifetime purchase. The operative program terms provided to approved ambassadors control if they differ from this summary.</p>
     </div>
   </footer>
 
