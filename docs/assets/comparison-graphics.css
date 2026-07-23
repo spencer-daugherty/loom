@@ -240,6 +240,7 @@
 }
 
 #compare .mini-win-card {
+  --win-outline: rgba(0, 95, 189, 0.48);
   position: absolute;
   left: 0;
   display: block;
@@ -247,35 +248,41 @@
   height: 60px;
   aspect-ratio: 1 / 1.42;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(29, 29, 31, 0.05);
   border-radius: 7px;
-  box-shadow: 0 3px 8px rgba(29, 29, 31, 0.12);
+  box-shadow: 0 3px 8px rgba(29, 29, 31, 0.07);
 }
 
 #compare .mini-win-card-blue {
   top: 0;
   z-index: 1;
-  background: #007aff;
+  background: #dbeeff;
 }
 
 #compare .mini-win-card-green {
+  --win-outline: rgba(36, 138, 63, 0.48);
   top: 9px;
   z-index: 2;
-  background: #34c759;
+  background: #dff4e5;
 }
 
 #compare .mini-win-card-orange {
+  --win-outline: rgba(168, 78, 0, 0.5);
   top: 18px;
   z-index: 3;
-  background: #ff9500;
+  background: #ffead0;
 }
 
 #compare .mini-win-card b {
   position: absolute;
-  inset: 15px 8px;
-  border: 2px solid rgba(255, 255, 255, 0.78);
-  border-radius: 3px;
-  transform: rotate(45deg) scale(0.72);
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 2px solid var(--win-outline);
+  border-radius: 2px;
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 
 #compare .comparison-point .comparison-kicker {
@@ -382,6 +389,7 @@
   }
 
   #compare .mini-win-card b {
-    inset: 12px 7px;
+    width: 18px;
+    height: 18px;
   }
 }
