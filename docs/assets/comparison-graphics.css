@@ -195,6 +195,7 @@
   min-width: 0;
   min-height: 0;
   align-items: center;
+  justify-content: space-between;
   gap: 5px;
   padding: 0 5px;
   border-radius: 7px;
@@ -209,15 +210,6 @@
   font-style: normal;
   font-weight: 700;
   line-height: 1;
-}
-
-#compare .mini-action-text {
-  position: static;
-  width: auto;
-  height: 3px;
-  flex: 1 1 auto;
-  border-radius: 999px;
-  background: #c7c7cc;
 }
 
 #compare .mini-action-attributes {
@@ -241,73 +233,55 @@
   font-weight: 800;
 }
 
-/* Fulfillment Insights: three simple rising stacked columns. */
+/* Little Wins: completed mini cards lifted behind the front card. */
 #compare .comparison-progress-graphic {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 10px;
-  padding: 28px 14px 15px;
+  display: grid;
+  place-items: center;
 }
 
-#compare .mini-insight-title {
+#compare .mini-win-stack {
+  position: relative;
+  width: 42px;
+  height: 78px;
+}
+
+#compare .mini-win-card {
   position: absolute;
-  top: 9%;
-  left: 10%;
-  color: #1d1d1f;
-  font-size: 6px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-#compare .mini-insight-grid {
-  position: absolute;
-  right: 13%;
-  bottom: 14px;
-  left: 13%;
-  height: 1px;
-  background: #c7c7cc;
-}
-
-#compare .mini-insight-bar {
-  position: static;
-  display: flex;
-  width: 18px;
-  overflow: hidden;
-  flex: 0 1 18px;
-  flex-direction: column-reverse;
-  border-radius: 6px 6px 2px 2px;
-  background: #ffffff;
-}
-
-#compare .mini-insight-bar-one {
-  height: 33%;
-}
-
-#compare .mini-insight-bar-two {
-  height: 50%;
-}
-
-#compare .mini-insight-bar-three {
-  height: 68%;
-}
-
-#compare .mini-insight-bar i {
+  left: 0;
   display: block;
-  width: 100%;
-  height: 33.333%;
+  width: 42px;
+  height: auto;
+  aspect-ratio: 1 / 1.42;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 7px;
+  box-shadow: 0 3px 8px rgba(29, 29, 31, 0.12);
 }
 
-#compare .mini-insight-bar i:nth-child(1) {
+#compare .mini-win-card-blue {
+  top: 0;
+  z-index: 1;
   background: #007aff;
 }
 
-#compare .mini-insight-bar i:nth-child(2) {
+#compare .mini-win-card-green {
+  top: 9px;
+  z-index: 2;
   background: #34c759;
 }
 
-#compare .mini-insight-bar i:nth-child(3) {
+#compare .mini-win-card-orange {
+  top: 18px;
+  z-index: 3;
   background: #ff9500;
+}
+
+#compare .mini-win-card b {
+  position: absolute;
+  inset: 15px 8px;
+  border: 2px solid rgba(255, 255, 255, 0.78);
+  border-radius: 3px;
+  transform: rotate(45deg) scale(0.72);
 }
 
 #compare .comparison-point .comparison-kicker {
@@ -386,12 +360,33 @@
     font-size: 4.7px;
   }
 
-  #compare .mini-action-group-title,
-  #compare .mini-insight-title {
+  #compare .mini-action-group-title {
     font-size: 5.3px;
   }
 
   #compare .mini-action-attributes em {
     font-size: 6px;
+  }
+
+  #compare .mini-win-stack {
+    width: 34px;
+    height: 64px;
+  }
+
+  #compare .mini-win-card {
+    width: 34px;
+    border-radius: 6px;
+  }
+
+  #compare .mini-win-card-green {
+    top: 8px;
+  }
+
+  #compare .mini-win-card-orange {
+    top: 16px;
+  }
+
+  #compare .mini-win-card b {
+    inset: 12px 7px;
   }
 }
