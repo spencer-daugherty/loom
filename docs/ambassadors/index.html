@@ -255,10 +255,11 @@
 
     .numbers { border-bottom: 1px solid var(--line); background: var(--surface); }
     .numbers-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .number { min-height: 162px; padding: 30px; border-right: 1px solid var(--line); }
+    .number { min-height: 132px; padding: 25px 28px; border-right: 1px solid var(--line); }
     .number:last-child { border-right: 0; }
-    .number strong { display: block; margin-bottom: 5px; font-size: 3.7rem; line-height: 1; }
+    .number strong { display: block; margin-bottom: 6px; font-size: 2.55rem; line-height: 1; }
     .number span { color: var(--muted); font-weight: 680; }
+    .number .number-kicker { display: block; margin-bottom: 8px; font-size: 0.74rem; font-weight: 820; letter-spacing: 0.05em; text-transform: uppercase; }
     .number:nth-child(1) strong { color: var(--blue); }
     .number:nth-child(2) strong { color: var(--green); }
     .number:nth-child(3) strong { color: var(--gold); }
@@ -267,7 +268,6 @@
     .section-intro { max-width: 720px; margin-bottom: 32px; }
     .section-intro p { color: var(--muted); font-size: 1.05rem; }
     .grid { display: grid; gap: 16px; }
-    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .card {
       padding: 24px;
@@ -290,12 +290,43 @@
       font-weight: 850;
     }
 
-    .offer-band { color: #ffffff; background: #151515; }
-    .offer-band .section-intro p, .offer-band .muted { color: rgba(255, 255, 255, 0.7); }
-    .offer-band .card { border-color: rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.06); box-shadow: none; }
-    .offer-value { margin-bottom: 16px; color: #ffffff; font-size: 4.2rem; font-weight: 870; line-height: 0.98; }
-    .offer-value.blue { color: #66b1ff; }
-    .offer-value.green { color: #72d6a4; }
+    .rewards { background: var(--bg); }
+    .reward-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .reward-card {
+      min-width: 0;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+    }
+    .reward-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+    .reward-head h3 { margin-bottom: 0; }
+    .reward-type {
+      flex: 0 0 auto;
+      padding: 5px 9px;
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--bg);
+      font-size: 0.72rem;
+      font-weight: 800;
+    }
+    .reward-payout { display: block; margin-bottom: 7px; color: var(--ink); font-size: 2.35rem; font-weight: 870; line-height: 1; }
+    .reward-label { min-height: 3.1em; margin-bottom: 22px; color: var(--muted); font-size: 0.92rem; }
+    .reward-audience { margin-bottom: 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
+    .reward-audience span, .reward-audience strong { display: block; }
+    .reward-audience span { margin-bottom: 3px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+    .reward-audience strong { color: var(--ink); font-size: 0.94rem; }
+    .program-disclaimer {
+      margin-top: 16px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.64);
+    }
+    .program-disclaimer summary { padding: 17px 20px; font-size: 0.92rem; }
+    .disclaimer-copy { max-width: 92ch; padding: 0 46px 18px 20px; color: var(--muted); font-size: 0.82rem; line-height: 1.6; }
+    .disclaimer-copy p { margin-bottom: 9px; }
+    .disclaimer-copy p:last-child { margin-bottom: 0; }
 
     .criteria-layout { display: grid; grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr); gap: 42px; align-items: start; }
     .criteria-list { display: grid; gap: 0; border-top: 1px solid var(--line); }
@@ -309,15 +340,6 @@
     .training-step:last-child { border-right: 0; }
     .training-step span { display: block; margin-bottom: 18px; color: var(--gold); font-size: 0.78rem; font-weight: 850; letter-spacing: 0; text-transform: uppercase; }
     .training-step p { margin-bottom: 0; color: var(--muted); }
-
-    .plan-table { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-    .plan-row { display: grid; grid-template-columns: 0.75fr 1.25fr 1.25fr; align-items: center; min-height: 108px; border-bottom: 1px solid var(--line); }
-    .plan-row:last-child { border-bottom: 0; }
-    .plan-row > div { padding: 20px 24px; }
-    .plan-name { font-weight: 850; }
-    .plan-copy { color: var(--muted); }
-    .plan-copy strong { color: var(--ink); }
-    .recommended { display: inline-block; margin-top: 6px; color: var(--green); font-size: 0.78rem; font-weight: 850; text-transform: uppercase; }
 
     .faq-list { max-width: 860px; }
     details { border-top: 1px solid var(--line); }
@@ -465,20 +487,17 @@
       h1 { max-width: 10ch; font-size: 3.25rem; }
       h2 { font-size: 2.25rem; }
       .lead { font-size: 1.08rem; }
-      .number strong { font-size: 3rem; }
-      .offer-value { font-size: 3.1rem; }
+      .number strong { font-size: 2.35rem; }
       section { padding: 52px 0; }
-      .numbers-grid, .grid.two, .grid.three, .training-grid { grid-template-columns: 1fr; }
+      .numbers-grid, .grid.three, .training-grid { grid-template-columns: 1fr; }
       .number { min-height: 118px; padding: 24px 18px; border-right: 0; border-bottom: 1px solid var(--line); }
       .number:last-child { border-bottom: 0; }
+      .reward-grid { grid-template-columns: 1fr; }
+      .reward-label { min-height: 0; }
       .training-step { border-right: 0; border-bottom: 1px solid var(--line); }
       .training-step:last-child { border-bottom: 0; }
       .button-row { align-items: stretch; flex-direction: column; }
       .button { width: 100%; }
-      .plan-row { grid-template-columns: 1fr; padding: 8px 0; }
-      .plan-row > div { padding: 8px 18px; }
-      .plan-row > div:first-child { padding-top: 18px; }
-      .plan-row > div:last-child { padding-bottom: 18px; }
       .footer-grid { display: grid; }
       .application-dialog { width: min(calc(100% - 14px), 780px); max-height: calc(100dvh - 14px); border-radius: 20px; }
       .dialog-surface { max-height: calc(100dvh - 14px); }
@@ -546,7 +565,7 @@
         <div class="hero-copy">
           <span class="eyebrow">For creators, coaches, and community leaders</span>
           <h1>Loom Ambassador Program</h1>
-          <p class="lead">Share a calmer way to plan life with an audience that trusts you. Your plan-specific code gives them 10% off eligible annual, monthly, or lifetime access. Each subscription referral earns one commission equal to 30% of the first eligible net payment&mdash;currently estimated at about $3.44 for a monthly referral or $18.13 for an annual referral under the example assumptions below. Lifetime referrals pay a separate flat $30.</p>
+          <p class="lead">Share Loom with an audience that trusts you. They save 10% on eligible plans, and you earn one reward for each qualifying referral.</p>
           <div class="button-row">
             <button class="button" type="button" data-open-application data-cta-position="hero" aria-haspopup="dialog" aria-controls="ambassador-application">Apply now</button>
             <a class="text-link" href="#criteria">See who qualifies</a>
@@ -558,9 +577,9 @@
 
     <div class="numbers" aria-label="Ambassador program highlights">
       <div class="shell numbers-grid">
-        <div class="number"><strong>10% off</strong><span>for your audience on eligible plans</span></div>
-        <div class="number"><strong>30% of first net payment</strong><span>one commission per qualifying subscription referral</span></div>
-        <div class="number"><strong>$30 flat</strong><span>for each qualifying lifetime referral</span></div>
+        <div class="number"><span class="number-kicker">Your audience</span><strong>10% off</strong><span>eligible monthly, annual, or lifetime access</span></div>
+        <div class="number"><span class="number-kicker">Subscriptions</span><strong>30% once</strong><span>of the first eligible net payment</span></div>
+        <div class="number"><span class="number-kicker">Lifetime</span><strong>$30 once</strong><span>for each qualifying referral</span></div>
       </div>
     </div>
 
@@ -590,25 +609,40 @@
       </div>
     </section>
 
-    <section class="offer-band" id="rewards">
+    <section class="rewards" id="rewards">
       <div class="shell">
         <div class="section-intro">
-          <h2>A simple offer on both sides.</h2>
-          <p>The benefit is easy to explain, and the commission is meaningfully above a basic referral fee.</p>
+          <h2>Simple rewards. Paid once.</h2>
+          <p>Your audience saves 10%. You receive one reward after each qualifying purchase clears the validation period.</p>
         </div>
-        <div class="grid two">
-          <article class="card">
-            <div class="offer-value blue">10% off</div>
-            <h3>For your audience</h3>
-            <p class="muted">Your plan-specific codes provide 10% off eligible annual or monthly payments during the customer's first 12 months, plus 10% off a qualifying lifetime purchase.</p>
+        <div class="reward-grid" aria-label="Ambassador rewards by Loom plan">
+          <article class="reward-card">
+            <div class="reward-head"><h3>Monthly</h3><span class="reward-type">Subscription</span></div>
+            <strong class="reward-payout">About $3.44</strong>
+            <p class="reward-label">Paid once on the first eligible monthly payment. No renewal commission.</p>
+            <p class="reward-audience"><span>Audience pays</span><strong>$13.50/month for the first 12 payments</strong></p>
           </article>
-          <article class="card">
-            <div class="offer-value green">30% once</div>
-            <h3>For you</h3>
-            <p class="muted">Earn one commission on the first eligible payment for each subscription referral: currently estimated at about $3.44 for monthly or $18.13 for annual under the example assumptions below. Monthly renewals do not earn additional commission. A lifetime referral pays a separate, fixed $30.</p>
+          <article class="reward-card">
+            <div class="reward-head"><h3>Annual</h3><span class="reward-type">Subscription</span></div>
+            <strong class="reward-payout">About $18.13</strong>
+            <p class="reward-label">Paid once when the first eligible annual payment completes after the 7-day free trial.</p>
+            <p class="reward-audience"><span>Audience pays</span><strong>$71.10 for the first annual term</strong></p>
+          </article>
+          <article class="reward-card">
+            <div class="reward-head"><h3>Lifetime</h3><span class="reward-type">One-time</span></div>
+            <strong class="reward-payout">$30</strong>
+            <p class="reward-label">A fixed one-time reward for each qualifying lifetime purchase.</p>
+            <p class="reward-audience"><span>Audience pays</span><strong>$116.10 once</strong></p>
           </article>
         </div>
-        <p class="fine" style="margin-top:18px">Net revenue means customer payments after Apple platform fees, taxes collected on Loom's behalf, refunds, and chargebacks. Approved balances are distributed on a monthly payout schedule after a 30-day validation period, with a $50 minimum balance.</p>
+        <details class="program-disclaimer">
+          <summary>Payment details and qualifications</summary>
+          <div class="disclaimer-copy">
+            <p>Estimated subscription rewards use current U.S. list prices ($15 monthly and $79 annual), the audience's 10% discount, and an assumed 15% Apple commission. Monthly: $15 &times; 90% &times; 85% &times; 30% = approximately $3.44. Annual: $79 &times; 90% &times; 85% &times; 30% = approximately $18.13. Actual rewards may vary by storefront pricing, Apple platform fees, taxes, refunds, and chargebacks.</p>
+            <p>Net revenue means the amount Loom receives after Apple platform fees, taxes collected on Loom's behalf, refunds, and chargebacks. Subscription commission is earned once on the referred customer's first eligible paid monthly or annual transaction; free trials must convert to a paid transaction, and renewals do not earn additional commission. Lifetime referrals pay a separate fixed $30 reward.</p>
+            <p>Purchases are reviewed for 30 days. Refunded, reversed, fraudulent, self-referred, untracked, or otherwise ineligible purchases do not earn a reward. Approved balances are distributed on a monthly payout schedule after the ambassador reaches a $50 minimum balance. The operative program terms provided to approved ambassadors control if they differ from these examples.</p>
+          </div>
+        </details>
       </div>
     </section>
 
@@ -659,33 +693,6 @@
           <div class="training-step"><span>Step 03</span><h3>85% knowledge check</h3><p>Confirm that you can explain the product and the program accurately.</p></div>
           <div class="training-step"><span>Step 04</span><h3>Content review</h3><p>Submit your first concept for a fast accuracy and disclosure check.</p></div>
         </div>
-      </div>
-    </section>
-
-    <section id="plans">
-      <div class="shell">
-        <div class="section-intro">
-          <h2>A 10% benefit across every plan.</h2>
-          <p>Each ambassador receives plan-specific codes giving eligible customers 10% off annual, monthly, or lifetime access. Each subscription referral earns one reward equal to 30% of the first eligible net payment. Lifetime referrals use a separate fixed payment.</p>
-        </div>
-        <div class="plan-table" role="table" aria-label="Ambassador offer by Loom plan">
-          <div class="plan-row" role="row">
-            <div class="plan-name" role="cell">Annual</div>
-            <div class="plan-copy" role="cell">Audience pays $71.10 for the first annual term at the current $79 U.S. price.</div>
-            <div class="plan-copy" role="cell"><strong>Estimated ambassador payout: about $18.13 once.</strong> This is 30% of eligible net annual revenue under the example assumptions below.</div>
-          </div>
-          <div class="plan-row" role="row">
-            <div class="plan-name" role="cell">Monthly</div>
-            <div class="plan-copy" role="cell">Audience pays $13.50 per month for the first 12 payments at the current $15 U.S. price.</div>
-            <div class="plan-copy" role="cell"><strong>Estimated ambassador payout: about $3.44 once</strong> on the first eligible monthly payment. Renewals do not earn additional commission.</div>
-          </div>
-          <div class="plan-row" role="row">
-            <div class="plan-name" role="cell">Lifetime</div>
-            <div class="plan-copy" role="cell">Audience pays $116.10 at the current $129 U.S. price through your unique lifetime code.</div>
-            <div class="plan-copy" role="cell"><strong>Ambassador payout: a fixed $30 once.</strong> It is not 30% of the lifetime price and is separate from subscription commission.</div>
-          </div>
-        </div>
-        <p class="fine" style="margin-top:18px">Subscription examples use current U.S. pricing, the audience's 10% discount, and a 15% Apple commission: Monthly: $15 &times; 90% &times; 85% &times; 30% = approximately $3.44 paid once on the first eligible payment. Annual: $79 &times; 90% &times; 85% &times; 30% = approximately $18.13 paid once. Monthly renewals do not earn additional commission. Actual payouts may vary by storefront pricing, Apple commission, taxes, refunds, and chargebacks.</p>
       </div>
     </section>
 
