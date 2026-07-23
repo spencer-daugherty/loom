@@ -163,6 +163,10 @@
   padding: 8px;
 }
 
+#compare .comparison-guidance-graphic::before {
+  content: none;
+}
+
 #compare .mini-action-group {
   --group-accent: #007aff;
   position: static;
@@ -195,21 +199,11 @@
   min-width: 0;
   min-height: 0;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 5px;
   padding: 0 5px;
   border-radius: 7px;
   background: #ffffff;
-}
-
-#compare .mini-action-check {
-  position: static;
-  flex: 0 0 auto;
-  color: var(--group-accent);
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 700;
-  line-height: 1;
 }
 
 #compare .mini-action-attributes {
@@ -250,7 +244,7 @@
   left: 0;
   display: block;
   width: 42px;
-  height: auto;
+  height: 60px;
   aspect-ratio: 1 / 1.42;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.42);
@@ -375,6 +369,7 @@
 
   #compare .mini-win-card {
     width: 34px;
+    height: 48px;
     border-radius: 6px;
   }
 
