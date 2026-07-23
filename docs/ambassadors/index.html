@@ -73,7 +73,7 @@
           {
             "@type": "Question",
             "name": "How are ambassador rewards paid?",
-            "acceptedAnswer": {"@type": "Answer", "text": "Loom pays a fixed one-time reward for each qualifying referral: $3 for monthly, $15 for annual, and $30 for lifetime. The annual reward becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional rewards, and every purchase is subject to the 30-day validation period."}
+            "acceptedAnswer": {"@type": "Answer", "text": "Ambassadors are paid one fixed reward for each qualifying referral: $3 for a monthly referral, $15 for an annual referral, and $30 for a lifetime referral. The annual payment becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional payments, and every purchase is subject to the 30-day validation period."}
           },
           {
             "@type": "Question",
@@ -254,15 +254,14 @@
     .text-link { color: var(--ink); font-weight: 780; text-underline-offset: 4px; }
 
     .numbers { border-bottom: 1px solid var(--line); background: var(--surface); }
-    .numbers-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .numbers-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .number { min-height: 132px; padding: 25px 28px; border-right: 1px solid var(--line); }
     .number:last-child { border-right: 0; }
     .number strong { display: block; margin-bottom: 6px; font-size: 2.55rem; line-height: 1; }
     .number span { color: var(--muted); font-weight: 680; }
     .number .number-kicker { display: block; margin-bottom: 8px; font-size: 0.74rem; font-weight: 820; letter-spacing: 0.05em; text-transform: uppercase; }
     .number:nth-child(1) strong { color: var(--blue); }
-    .number:nth-child(2) strong { color: var(--green); }
-    .number:nth-child(3) strong { color: var(--gold); }
+    .number:nth-child(n + 2) strong { color: var(--green); }
 
     section { padding: 78px 0; border-bottom: 1px solid var(--line); }
     .section-intro { max-width: 720px; margin-bottom: 32px; }
@@ -311,6 +310,7 @@
       font-weight: 800;
     }
     .reward-payout { display: block; margin-bottom: 7px; color: var(--ink); font-size: 2.35rem; font-weight: 870; line-height: 1; }
+    .reward-paid-label { display: block; margin-bottom: 8px; color: var(--green); font-size: 0.74rem; font-weight: 840; letter-spacing: 0.05em; text-transform: uppercase; }
     .reward-label { min-height: 3.1em; margin-bottom: 22px; color: var(--muted); font-size: 0.92rem; }
     .reward-audience { margin-bottom: 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
     .reward-audience span, .reward-audience strong { display: block; }
@@ -468,6 +468,10 @@
       .site-nav { display: none; }
       .hero { min-height: auto; background-position: right -90px center; background-size: 620px auto; }
       .hero::before { background: rgba(251, 250, 247, 0.87); }
+      .numbers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .number { border-bottom: 1px solid var(--line); }
+      .number:nth-child(2n) { border-right: 0; }
+      .number:nth-last-child(-n + 2) { border-bottom: 0; }
       .grid.three, .training-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .training-step:nth-child(2) { border-right: 0; }
       .training-step:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
@@ -491,6 +495,7 @@
       section { padding: 52px 0; }
       .numbers-grid, .grid.three, .training-grid { grid-template-columns: 1fr; }
       .number { min-height: 118px; padding: 24px 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .number:nth-last-child(-n + 2) { border-bottom: 1px solid var(--line); }
       .number:last-child { border-bottom: 0; }
       .reward-grid { grid-template-columns: 1fr; }
       .reward-label { min-height: 0; }
@@ -578,8 +583,9 @@
     <div class="numbers" aria-label="Ambassador program highlights">
       <div class="shell numbers-grid">
         <div class="number"><span class="number-kicker">Your audience</span><strong>10% off</strong><span>eligible monthly, annual, or lifetime access</span></div>
-        <div class="number"><span class="number-kicker">Subscriptions</span><strong>$3 / $15</strong><span>monthly / annual, paid once</span></div>
-        <div class="number"><span class="number-kicker">Lifetime</span><strong>$30 once</strong><span>for each qualifying referral</span></div>
+        <div class="number"><span class="number-kicker">Monthly referral</span><strong>$3</strong><span>you are paid once</span></div>
+        <div class="number"><span class="number-kicker">Annual referral</span><strong>$15</strong><span>you are paid once</span></div>
+        <div class="number"><span class="number-kicker">Lifetime referral</span><strong>$30</strong><span>you are paid once</span></div>
       </div>
     </div>
 
@@ -612,24 +618,27 @@
     <section class="rewards" id="rewards">
       <div class="shell">
         <div class="section-intro">
-          <h2>Simple rewards. Paid once.</h2>
-          <p>Your audience saves 10%. You receive one reward after each qualifying purchase clears the validation period.</p>
+          <h2>Exactly what you are paid.</h2>
+          <p>One fixed payment for each qualifying referral. No percentages and no renewal tracking.</p>
         </div>
         <div class="reward-grid" aria-label="Ambassador rewards by Loom plan">
           <article class="reward-card">
             <div class="reward-head"><h3>Monthly</h3><span class="reward-type">Subscription</span></div>
+            <span class="reward-paid-label">You are paid</span>
             <strong class="reward-payout">$3</strong>
             <p class="reward-label">A fixed one-time reward for each qualifying monthly referral. No renewal rewards.</p>
-            <p class="reward-audience"><span>Audience pays</span><strong>$13.50/month for the first 12 payments</strong></p>
+            <p class="reward-audience"><span>Audience pays</span><strong>$13.50 each month for the first 12 payments</strong></p>
           </article>
           <article class="reward-card">
             <div class="reward-head"><h3>Annual</h3><span class="reward-type">Subscription</span></div>
+            <span class="reward-paid-label">You are paid</span>
             <strong class="reward-payout">$15</strong>
             <p class="reward-label">A fixed one-time reward when the annual purchase completes after the 7-day free trial.</p>
             <p class="reward-audience"><span>Audience pays</span><strong>$71.10 for the first annual term</strong></p>
           </article>
           <article class="reward-card">
             <div class="reward-head"><h3>Lifetime</h3><span class="reward-type">One-time</span></div>
+            <span class="reward-paid-label">You are paid</span>
             <strong class="reward-payout">$30</strong>
             <p class="reward-label">A fixed one-time reward for each qualifying lifetime referral.</p>
             <p class="reward-audience"><span>Audience pays</span><strong>$116.10 once</strong></p>
@@ -638,7 +647,7 @@
         <details class="program-disclaimer">
           <summary>Payment details and qualifications</summary>
           <div class="disclaimer-copy">
-            <p>Rewards are fixed one-time payments: $3 for a qualifying monthly referral, $15 for a qualifying annual referral, and $30 for a qualifying lifetime referral. Annual free trials must convert to a paid purchase before the reward becomes eligible. Monthly and annual renewals do not earn additional rewards.</p>
+            <p>Ambassadors are paid one fixed reward for each qualifying referral: $3 for a monthly referral, $15 for an annual referral, and $30 for a lifetime referral. Annual free trials must convert to a paid purchase before the payment becomes eligible. Monthly and annual renewals do not earn additional payments.</p>
             <p>Purchases are reviewed for 30 days. Refunded, reversed, fraudulent, self-referred, untracked, or otherwise ineligible purchases do not earn a reward. Approved balances are distributed on a monthly payout schedule after the ambassador reaches a $50 minimum balance. The operative program terms provided to approved ambassadors control if they differ from this summary.</p>
           </div>
         </details>
@@ -709,7 +718,7 @@
           </details>
           <details>
             <summary>How are ambassador rewards paid?</summary>
-            <div class="faq-copy">Loom pays a fixed one-time reward for each qualifying referral: $3 for monthly, $15 for annual, and $30 for lifetime. The annual reward becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional rewards, and every purchase is subject to the 30-day validation period.</div>
+            <div class="faq-copy">Ambassadors are paid one fixed reward for each qualifying referral: $3 for a monthly referral, $15 for an annual referral, and $30 for a lifetime referral. The annual payment becomes eligible only after the 7-day free trial converts to a paid purchase. Subscription renewals do not earn additional payments, and every purchase is subject to the 30-day validation period.</div>
           </details>
           <details>
             <summary>How is lifetime access handled?</summary>
