@@ -2087,23 +2087,6 @@
         padding: 4px 0 6px;
       }
 
-      .ecosystem-map::before {
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: 126px;
-        bottom: 124px;
-        z-index: 0;
-        width: 2px;
-        border-radius: 999px;
-        background: linear-gradient(180deg, rgba(0, 122, 255, 0.28), rgba(52, 199, 89, 0.32), rgba(255, 149, 0, 0.3));
-        transform: translateX(-50%);
-      }
-
-      .ecosystem-lines {
-        display: none;
-      }
-
       .ecosystem-layer > h3 {
         max-width: 25ch;
         font-size: 1.12rem;
@@ -4463,6 +4446,113 @@
       }
     }
 
+    /* Match the in-app Loom Ecosystem: measured routes, clear layers, and static flow. */
+    .ecosystem-lines {
+      display: block;
+      overflow: visible;
+    }
+
+    .ecosystem-route,
+    .ecosystem-route-glow {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .ecosystem-route {
+      stroke-width: 1.55;
+      opacity: 0.54;
+    }
+
+    .ecosystem-route.is-soft {
+      filter: url("#ecosystem-route-soft");
+    }
+
+    .ecosystem-route-glow {
+      stroke-width: 7;
+      opacity: 0.16;
+      filter: url("#ecosystem-route-glow");
+    }
+
+    .area-stack,
+    .passion-row,
+    .ecosystem-layer > h3,
+    .ecosystem-eyebrow,
+    .system-node {
+      background: transparent;
+    }
+
+    .radar {
+      overflow: visible;
+      isolation: isolate;
+      background: transparent;
+    }
+
+    .radar::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      background: var(--ecosystem-surface, #ffffff);
+      clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    }
+
+    .radar-fill {
+      z-index: 1;
+    }
+
+    .radar svg {
+      z-index: 2;
+    }
+
+    .ecosystem-little-wins {
+      width: 52px;
+      height: 40px;
+      isolation: isolate;
+    }
+
+    .ecosystem-little-card {
+      top: 0;
+      width: 28px;
+      height: 40px;
+      overflow: hidden;
+      isolation: isolate;
+      border-radius: 4px;
+      box-shadow: 0 5px 11px rgba(17, 17, 17, 0.12);
+    }
+
+    .ecosystem-little-card:nth-child(1) { left: 24px; z-index: 4; }
+    .ecosystem-little-card:nth-child(2) { left: 16px; z-index: 3; }
+    .ecosystem-little-card:nth-child(3) { left: 8px; z-index: 2; }
+    .ecosystem-little-card:nth-child(4) { left: 0; z-index: 1; }
+
+    .ecosystem-little-card::after {
+      z-index: 1;
+      width: 14px;
+      height: 14px;
+    }
+
+    @media (max-width: 920px) {
+      .ecosystem-map::before {
+        display: none;
+        content: none;
+      }
+
+      .ecosystem-lines {
+        display: block;
+      }
+
+      .ecosystem-little-wins {
+        width: 52px;
+        transform: none;
+      }
+
+      .fulfillment-cluster-lines {
+        display: none;
+      }
+    }
+
   </style>
   <link rel="stylesheet" href="/assets/site-navigation.css">
   <link rel="stylesheet" href="/assets/comparison-graphics.css?v=20260722-4">
@@ -4563,42 +4653,17 @@
 
         <div class="ecosystem-card">
             <div class="ecosystem-map" aria-label="Static Loom Ecosystem map">
-              <svg class="ecosystem-lines" viewBox="0 0 1000 680" preserveAspectRatio="none" aria-hidden="true">
-                <g class="ecosystem-route-bundle ecosystem-route-purpose">
-                  <path d="M365 112 C410 188 520 296 607 386" stroke="rgba(255, 45, 85, 0.68)"></path>
-                  <path d="M380 112 C432 196 532 300 615 386" stroke="rgba(175, 82, 222, 0.68)"></path>
-                  <path d="M395 112 C450 204 545 304 623 386" stroke="rgba(0, 122, 255, 0.68)"></path>
-                  <path d="M445 112 C474 194 548 298 612 386" stroke="rgba(0, 122, 255, 0.68)"></path>
-                  <path d="M460 112 C492 202 558 302 620 386" stroke="rgba(90, 200, 250, 0.68)"></path>
-                  <path d="M475 112 C510 210 568 306 628 386" stroke="rgba(48, 176, 199, 0.68)"></path>
-                  <path d="M525 112 C542 194 580 298 617 386" stroke="rgba(255, 149, 0, 0.68)"></path>
-                  <path d="M540 112 C558 202 590 302 625 386" stroke="rgba(255, 204, 0, 0.68)"></path>
-                  <path d="M555 112 C574 210 600 306 633 386" stroke="rgba(255, 59, 48, 0.68)"></path>
-                  <path d="M605 112 C608 194 615 298 622 386" stroke="rgba(52, 199, 89, 0.68)"></path>
-                  <path d="M620 112 C624 202 625 302 630 386" stroke="rgba(48, 176, 199, 0.68)"></path>
-                  <path d="M635 112 C640 210 635 306 638 386" stroke="rgba(175, 82, 222, 0.68)"></path>
-                </g>
-                <g class="ecosystem-route-bundle ecosystem-route-systems">
-                  <path d="M608 424 C560 468 398 548 175 608" stroke="rgba(0, 122, 255, 0.68)"></path>
-                  <path d="M614 424 C566 476 408 552 185 608" stroke="rgba(255, 149, 0, 0.68)"></path>
-                  <path d="M620 424 C572 484 418 556 195 608" stroke="rgba(255, 59, 48, 0.68)"></path>
-                  <path d="M626 424 C578 492 428 560 205 608" stroke="rgba(52, 199, 89, 0.68)"></path>
-                  <path d="M632 424 C584 500 438 564 215 608" stroke="rgba(175, 82, 222, 0.68)"></path>
-                  <path d="M638 424 C590 508 448 568 225 608" stroke="rgba(48, 176, 199, 0.68)"></path>
-                  <path d="M610 424 C594 472 548 548 465 608" stroke="rgba(0, 122, 255, 0.68)"></path>
-                  <path d="M616 424 C602 478 554 552 477 608" stroke="rgba(255, 149, 0, 0.68)"></path>
-                  <path d="M622 424 C610 484 560 556 489 608" stroke="rgba(255, 59, 48, 0.68)"></path>
-                  <path d="M628 424 C618 490 566 560 501 608" stroke="rgba(52, 199, 89, 0.68)"></path>
-                  <path d="M634 424 C626 496 572 564 513 608" stroke="rgba(175, 82, 222, 0.68)"></path>
-                  <path d="M640 424 C634 502 578 568 525 608" stroke="rgba(48, 176, 199, 0.68)"></path>
-                  <path d="M612 424 C660 472 708 548 765 608" stroke="rgba(0, 122, 255, 0.68)"></path>
-                  <path d="M618 424 C668 478 718 552 777 608" stroke="rgba(255, 149, 0, 0.68)"></path>
-                  <path d="M624 424 C676 484 728 556 789 608" stroke="rgba(255, 59, 48, 0.68)"></path>
-                  <path d="M630 424 C684 490 738 560 801 608" stroke="rgba(52, 199, 89, 0.68)"></path>
-                  <path d="M636 424 C692 496 748 564 813 608" stroke="rgba(175, 82, 222, 0.68)"></path>
-                  <path d="M642 424 C700 502 758 568 825 608" stroke="rgba(48, 176, 199, 0.68)"></path>
-                </g>
-            </svg>
+              <svg class="ecosystem-lines" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <filter id="ecosystem-route-soft" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="0.45"></feGaussianBlur>
+                  </filter>
+                  <filter id="ecosystem-route-glow" x="-35%" y="-35%" width="170%" height="170%">
+                    <feGaussianBlur stdDeviation="3.2"></feGaussianBlur>
+                  </filter>
+                </defs>
+                <g data-ecosystem-routes></g>
+              </svg>
 
             <div class="ecosystem-layer purpose-layer">
               <p class="ecosystem-eyebrow">Purpose</p>
@@ -4635,20 +4700,6 @@
               <p class="ecosystem-eyebrow">Fulfillment</p>
               <h3>These areas make up your life.</h3>
               <div class="fulfillment-cluster">
-                <svg class="fulfillment-cluster-lines" viewBox="0 0 620 206" preserveAspectRatio="none" aria-hidden="true">
-                  <path d="M210 7.5 Q315 38 411 103" stroke="rgba(0, 122, 255, 0.58)"></path>
-                  <path d="M210 15 Q315 44 411 103" stroke="rgba(0, 122, 255, 0.58)"></path>
-                  <path d="M210 22.5 Q315 50 411 103" stroke="rgba(0, 122, 255, 0.58)"></path>
-                  <path d="M210 45.5 Q316 68 411 103" stroke="rgba(255, 149, 0, 0.58)"></path>
-                  <path d="M210 53 Q316 74 411 103" stroke="rgba(255, 149, 0, 0.58)"></path>
-                  <path d="M210 60.5 Q316 80 411 103" stroke="rgba(255, 149, 0, 0.58)"></path>
-                  <path d="M210 83.5 Q316 94 411 103" stroke="rgba(255, 59, 48, 0.58)"></path>
-                  <path d="M210 91 Q316 100 411 103" stroke="rgba(255, 59, 48, 0.58)"></path>
-                  <path d="M210 98.5 Q316 106 411 103" stroke="rgba(255, 59, 48, 0.58)"></path>
-                  <path d="M210 121.5 Q315 132 411 103" stroke="rgba(52, 199, 89, 0.58)"></path>
-                  <path d="M210 129 Q315 138 411 103" stroke="rgba(52, 199, 89, 0.58)"></path>
-                  <path d="M210 136.5 Q315 144 411 103" stroke="rgba(52, 199, 89, 0.58)"></path>
-                </svg>
                 <div class="area-stack" aria-label="Fulfillment areas">
                   <span class="area-chip blue">Career &amp; Business</span>
                   <span class="area-chip orange">Health &amp; Energy</span>
@@ -5529,6 +5580,193 @@
       reducedMotionQuery.addEventListener?.("change", restartCarouselTimer);
 
       restartCarouselTimer();
+    }
+
+    const ecosystemMap = document.querySelector(".ecosystem-map");
+    const ecosystemSvg = ecosystemMap?.querySelector(".ecosystem-lines");
+    const ecosystemRoutes = ecosystemSvg?.querySelector("[data-ecosystem-routes]");
+
+    if (ecosystemMap && ecosystemSvg && ecosystemRoutes) {
+      const svgNamespace = "http://www.w3.org/2000/svg";
+      const routePalette = [
+        "rgba(0, 122, 255, 0.68)",
+        "rgba(255, 149, 0, 0.68)",
+        "rgba(255, 59, 48, 0.68)",
+        "rgba(52, 199, 89, 0.68)"
+      ];
+      let ecosystemLayoutFrame;
+
+      function ecosystemPoint(rect, mapRect, xPosition, yPosition) {
+        return {
+          x: xPosition(rect) - mapRect.left,
+          y: yPosition(rect) - mapRect.top
+        };
+      }
+
+      function ecosystemWavyPath(start, end, seed, routeType) {
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const bendScale = routeType === "purpose" ? 0.78 : routeType === "systems" ? 0.52 : 0.42;
+        const bendJitter = ((seed % 7) - 3) * 0.9;
+        const controlOne = {
+          x: start.x + (dx * bendScale) + bendJitter,
+          y: start.y + (dy * 0.18)
+        };
+        const controlTwo = {
+          x: end.x - (dx * 0.18) - (bendJitter * 0.4),
+          y: end.y - (dy * 0.34)
+        };
+        const amplitude = 0.65 + ((seed % 5) * 0.22);
+        const frequency = 1.9 + ((seed % 4) * 0.42);
+        const phase = (seed % 13) * 0.37;
+        const samples = 48;
+        const points = [];
+
+        for (let index = 0; index <= samples; index += 1) {
+          const t = index / samples;
+          const inverse = 1 - t;
+          const x =
+            (inverse ** 3 * start.x) +
+            (3 * inverse ** 2 * t * controlOne.x) +
+            (3 * inverse * t ** 2 * controlTwo.x) +
+            (t ** 3 * end.x);
+          const y =
+            (inverse ** 3 * start.y) +
+            (3 * inverse ** 2 * t * controlOne.y) +
+            (3 * inverse * t ** 2 * controlTwo.y) +
+            (t ** 3 * end.y);
+          const tangentX =
+            (3 * inverse ** 2 * (controlOne.x - start.x)) +
+            (6 * inverse * t * (controlTwo.x - controlOne.x)) +
+            (3 * t ** 2 * (end.x - controlTwo.x));
+          const tangentY =
+            (3 * inverse ** 2 * (controlOne.y - start.y)) +
+            (6 * inverse * t * (controlTwo.y - controlOne.y)) +
+            (3 * t ** 2 * (end.y - controlTwo.y));
+          const tangentLength = Math.max(1, Math.hypot(tangentX, tangentY));
+          const edgeFade = Math.sin(Math.PI * t);
+          const wave =
+            (
+              Math.sin((t * Math.PI * 2 * frequency) + phase) +
+              (Math.sin((t * Math.PI * 2 * (frequency * 2.35)) - phase) * 0.28)
+            ) * amplitude * edgeFade;
+
+          points.push({
+            x: x + ((-tangentY / tangentLength) * wave),
+            y: y + ((tangentX / tangentLength) * wave)
+          });
+        }
+
+        return points
+          .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+          .join(" ");
+      }
+
+      function addEcosystemRoute(start, end, color, seed, routeType) {
+        const pathData = ecosystemWavyPath(start, end, seed, routeType);
+        const route = document.createElementNS(svgNamespace, "path");
+        route.setAttribute("class", `ecosystem-route ecosystem-route-${routeType}${seed % 3 === 0 ? " is-soft" : ""}`);
+        route.setAttribute("d", pathData);
+        route.setAttribute("stroke", color);
+        ecosystemRoutes.append(route);
+
+        const glow = document.createElementNS(svgNamespace, "path");
+        const glowLength = 9 + (seed % 7);
+        glow.setAttribute("class", `ecosystem-route-glow ecosystem-route-${routeType}-glow`);
+        glow.setAttribute("d", pathData);
+        glow.setAttribute("pathLength", "100");
+        glow.setAttribute("stroke", color);
+        glow.style.strokeDasharray = `${glowLength} ${100 - glowLength}`;
+        glow.style.strokeDashoffset = `${-((seed * 11) % 82)}`;
+        ecosystemRoutes.append(glow);
+      }
+
+      function layoutEcosystemRoutes() {
+        const mapRect = ecosystemMap.getBoundingClientRect();
+        const radar = ecosystemMap.querySelector(".radar");
+        const passionCircles = Array.from(ecosystemMap.querySelectorAll(".passion-circle"));
+        const areaChips = Array.from(ecosystemMap.querySelectorAll(".area-chip"));
+        const systemNodes = Array.from(ecosystemMap.querySelectorAll(".system-node"));
+        if (!radar || mapRect.width < 1 || mapRect.height < 1) return;
+
+        const radarRect = radar.getBoundingClientRect();
+        const radarCenter = ecosystemPoint(
+          radarRect,
+          mapRect,
+          (rect) => rect.left + (rect.width / 2),
+          (rect) => rect.top + (rect.height / 2)
+        );
+
+        ecosystemSvg.setAttribute("viewBox", `0 0 ${mapRect.width} ${mapRect.height}`);
+        ecosystemRoutes.replaceChildren();
+
+        passionCircles.forEach((circle, circleIndex) => {
+          const circleRect = circle.getBoundingClientRect();
+          [-1, 1].forEach((direction, laneIndex) => {
+            const start = ecosystemPoint(
+              circleRect,
+              mapRect,
+              (rect) => rect.left + (rect.width / 2) + (direction * Math.min(4, rect.width * 0.07)),
+              (rect) => rect.bottom + 1
+            );
+            const grey = laneIndex === 0
+              ? "rgba(142, 142, 147, 0.58)"
+              : "rgba(199, 199, 204, 0.72)";
+            addEcosystemRoute(start, radarCenter, grey, 17 + (circleIndex * 13) + laneIndex, "purpose");
+          });
+        });
+
+        areaChips.forEach((chip, chipIndex) => {
+          const chipRect = chip.getBoundingClientRect();
+          [-0.25, 0, 0.25].forEach((verticalRatio, laneIndex) => {
+            const start = ecosystemPoint(
+              chipRect,
+              mapRect,
+              (rect) => rect.right - 10,
+              (rect) => rect.top + (rect.height / 2) + (rect.height * verticalRatio)
+            );
+            addEcosystemRoute(
+              start,
+              radarCenter,
+              routePalette[chipIndex % routePalette.length],
+              101 + (chipIndex * 19) + laneIndex,
+              "fulfillment"
+            );
+          });
+        });
+
+        systemNodes.forEach((node, nodeIndex) => {
+          const nodeRect = node.getBoundingClientRect();
+          const nodeColors = nodeIndex === 1 ? [...routePalette].reverse() : routePalette;
+          const targetBand = Math.min(31, Math.max(14, nodeRect.width * 0.16));
+          nodeColors.forEach((color, laneIndex) => {
+            const laneProgress = nodeColors.length === 1 ? 0.5 : laneIndex / (nodeColors.length - 1);
+            const target = ecosystemPoint(
+              nodeRect,
+              mapRect,
+              (rect) => rect.left + (rect.width / 2) - (targetBand / 2) + (targetBand * laneProgress),
+              (rect) => rect.top + 6
+            );
+            addEcosystemRoute(
+              target,
+              radarCenter,
+              color,
+              211 + (nodeIndex * 31) + laneIndex,
+              "systems"
+            );
+          });
+        });
+      }
+
+      function queueEcosystemLayout() {
+        window.cancelAnimationFrame(ecosystemLayoutFrame);
+        ecosystemLayoutFrame = window.requestAnimationFrame(layoutEcosystemRoutes);
+      }
+
+      new ResizeObserver(queueEcosystemLayout).observe(ecosystemMap);
+      window.addEventListener("resize", queueEcosystemLayout, { passive: true });
+      document.fonts?.ready.then(queueEcosystemLayout);
+      queueEcosystemLayout();
     }
 
     const comparisonTable = document.querySelector("[data-comparison-table]");
