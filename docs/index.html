@@ -2820,13 +2820,18 @@
 
     @media (max-width: 640px) {
       .hero {
-        min-height: auto;
+        min-height: max(700px, calc(100svh - 132px));
+        align-items: end;
+      }
+
+      .ambassador-banner-dismissed .hero {
+        min-height: max(700px, calc(100svh - 64px));
       }
 
       .hero::before {
         background:
           linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.985)),
-          url("assets/landing/loom-hero-phone.png") right 0 top 18px / min(112vw, 430px) auto no-repeat;
+          url("assets/landing/loom-hero-phone.png") right 0 top 6px / min(112vw, 430px) auto no-repeat;
       }
 
       .hero::after {
