@@ -448,6 +448,45 @@ h1, h2, h3 { text-wrap: balance; }
   text-transform: uppercase;
 }
 
+.card-taxonomy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.topic-tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #4f5661;
+  background: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 780;
+  letter-spacing: 0.035em;
+  line-height: 1;
+}
+
+.card-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.card-details > * + *::before {
+  margin-right: 6px;
+  color: rgba(93, 100, 112, 0.55);
+  content: "·";
+}
+
 .capability-pill {
   display: inline-flex;
   width: fit-content;
@@ -624,6 +663,49 @@ h1, h2, h3 { text-wrap: balance; }
 
 .editorial-note p:last-child { margin-bottom: 0; }
 
+.policy-footer-note {
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.policy-footer-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.policy-footer-note a {
+  color: #005fc7;
+  font-weight: 780;
+  text-decoration: none;
+}
+
+.policy-footer-note a:hover { text-decoration: underline; }
+
+.author-profile-heading {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 26px;
+  align-items: center;
+  width: min(calc(100% - 28px), 900px);
+  margin: 0 auto;
+}
+
+.author-profile-heading h1 {
+  max-width: none;
+}
+
+.author-profile-photo {
+  width: 112px;
+  height: 112px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 10px 28px rgba(17, 17, 17, 0.08);
+}
+
 .footer {
   padding: 42px 0 54px;
   border-top: 1px solid var(--line);
@@ -679,6 +761,16 @@ h1, h2, h3 { text-wrap: balance; }
   .hero-proof { width: min(100%, 330px); }
   .card-grid { grid-template-columns: 1fr; }
   .cluster-intro { gap: 8px; }
+
+  .author-profile-heading {
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .author-profile-photo {
+    width: 82px;
+    height: 82px;
+  }
 }
 
 @media (max-width: 620px) {
@@ -691,6 +783,16 @@ h1, h2, h3 { text-wrap: balance; }
   .author-card {
     grid-template-columns: 1fr;
     text-align: left;
+  }
+
+  .author-profile-heading {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .author-profile-photo {
+    width: 64px;
+    height: 64px;
   }
 
   .footer-grid { display: grid; }
