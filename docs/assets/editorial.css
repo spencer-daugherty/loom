@@ -63,6 +63,34 @@ h1, h2, h3 { text-wrap: balance; }
   content: "";
 }
 
+.article-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+}
+
+.article-label-row .eyebrow {
+  margin-bottom: 0;
+}
+
+.content-type-tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid rgba(0, 95, 199, 0.12);
+  border-radius: 999px;
+  color: #0757a6;
+  background: rgba(0, 122, 255, 0.08);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.065em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .article-hero,
 .pillar-hero {
   border-bottom: 1px solid var(--line);
