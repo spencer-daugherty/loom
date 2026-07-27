@@ -1,4 +1,37 @@
 (function () {
+  document.addEventListener('click', function (event) {
+    var appStoreLink = event.target.closest('[data-app-store-cta]');
+    if (
+      appStoreLink &&
+      (
+        appStoreLink.dataset.contentSlug ||
+        appStoreLink.dataset.contentCluster ||
+        appStoreLink.dataset.searchIntent
+      ) &&
+      typeof window.gtag === 'function'
+    ) {
+      window.gtag('event', 'app_store_click', {
+        page_type: appStoreLink.dataset.pageType || '',
+        content_slug: appStoreLink.dataset.contentSlug || '',
+        content_cluster: appStoreLink.dataset.contentCluster || '',
+        target_keyword: appStoreLink.dataset.targetKeyword || '',
+        search_intent: appStoreLink.dataset.searchIntent || '',
+        cta_position: appStoreLink.dataset.ctaPosition || '',
+        destination: 'app_store'
+      });
+    }
+
+    var articleLink = event.target.closest('[data-article-link]');
+    if (articleLink && typeof window.gtag === 'function') {
+      window.gtag('event', 'article_link_click', {
+        source_slug: articleLink.dataset.sourceSlug || '',
+        destination_slug: articleLink.dataset.destinationSlug || '',
+        content_cluster: articleLink.dataset.contentCluster || '',
+        link_position: articleLink.dataset.linkPosition || ''
+      });
+    }
+  });
+
   var header = document.querySelector('[data-site-header]');
   if (!header) return;
 

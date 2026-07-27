@@ -3718,6 +3718,19 @@
         text-wrap: pretty;
       }
 
+      #screenshots .screenshots {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #screenshots .screenshot-copy {
+        justify-self: center;
+        width: min(100%, 440px);
+      }
+
+      #screenshots .screenshot-copy-card {
+        min-width: 0;
+      }
+
       #screenshots .carousel-arrow {
         width: 56px;
         height: 56px;
@@ -4806,18 +4819,18 @@
           <article class="card research-card">
             <h3>Research and inspiration</h3>
             <p>
-              Loom draws from broad productivity and personal-development ideas, then turns them into one practical, easily repeatable structure.
+              Loom draws from broad productivity and personal-development ideas, then independently turns the problems they illuminate into Loom&rsquo;s own practical product language, structure, and experience.
             </p>
             <ul class="research-sources" aria-label="Research inspiration list">
               <li>
-                Tony Robbins - <strong><em>Time of Your Life</em></strong>
+                Tony Robbins - <a href="https://go.tonyrobbins.com/rpm" rel="noopener"><strong><em>Time of Your Life</em></strong></a>
                 <ul>
                   <li>Rapid Planning Method (RPM).</li>
                 </ul>
               </li>
-              <li>David Allen - <cite>Getting Things Done: The Art of Stress-Free Productivity</cite>.</li>
-              <li>Stephen R. Covey - <cite>The 7 Habits of Highly Effective People</cite>.</li>
-              <li>James Clear - <cite>Atomic Habits: An Easy &amp; Proven Way to Build Good Habits &amp; Break Bad Ones</cite>.</li>
+              <li>David Allen - <a href="https://gettingthingsdone.com/what-is-gtd/" rel="noopener"><cite>Getting Things Done: The Art of Stress-Free Productivity</cite></a>.</li>
+              <li>Stephen R. Covey - <a href="https://www.franklincovey.com/the-7-habits/" rel="noopener"><cite>The 7 Habits of Highly Effective People</cite></a>.</li>
+              <li>James Clear - <a href="https://jamesclear.com/atomic-habits" rel="noopener"><cite>Atomic Habits: An Easy &amp; Proven Way to Build Good Habits &amp; Break Bad Ones</cite></a>.</li>
             </ul>
             <div class="research-pill-row" aria-label="Additional research themes">
               <span class="research-pill">Habit formation research</span>
@@ -4826,8 +4839,33 @@
               <span class="research-pill">AI-assisted planning</span>
             </div>
             <p class="research-disclaimer">
-              Loom is not affiliated with, sponsored by, or endorsed by Tony Robbins, David Allen, Stephen Covey, James Clear, or their organizations.
+              Loom is independently designed and does not reproduce or formally implement these authors&rsquo; branded systems. Loom is not affiliated with, sponsored by, or endorsed by Tony Robbins, David Allen, Stephen Covey, James Clear, or their organizations. &ldquo;End Stress and Live Fulfilled&rdquo; is Loom&rsquo;s original founding theme.
             </p>
+          </article>
+        </div>
+
+        <div class="section-head" style="margin-top:44px">
+          <div>
+            <h3>New from Loom</h3>
+            <p>Practical guides for moving beyond disconnected to-do lists.</p>
+          </div>
+          <a class="text-link" href="/articles/">Browse all articles <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="grid three">
+          <article class="card accent-top">
+            <span class="eyebrow">Task overload</span>
+            <h3><a href="/articles/overwhelmed-by-your-to-do-list/" data-article-link data-source-slug="homepage" data-destination-slug="overwhelmed-by-your-to-do-list" data-content-cluster="task-overload" data-link-position="research-latest">Why to-do lists become overwhelming</a></h3>
+            <p>Separate Capture from commitment and give important actions the context they need.</p>
+          </article>
+          <article class="card accent-top">
+            <span class="eyebrow">Goals and action</span>
+            <h3><a href="/articles/how-to-turn-a-goal-into-an-action-plan/" data-article-link data-source-slug="homepage" data-destination-slug="how-to-turn-a-goal-into-an-action-plan" data-content-cluster="goals-action" data-link-position="research-latest">Turn a goal into visible action</a></h3>
+            <p>Clarify the finish line, choose the Musts, and make the next useful progress visible.</p>
+          </article>
+          <article class="card accent-top">
+            <span class="eyebrow">Little Wins</span>
+            <h3><a href="/articles/small-daily-actions-for-big-goals/" data-article-link data-source-slug="homepage" data-destination-slug="small-daily-actions-for-big-goals" data-content-cluster="little-wins" data-link-position="research-latest">Make progress possible on ordinary days</a></h3>
+            <p>Use a few small repeatable actions that remain useful when life is busy.</p>
           </article>
         </div>
       </div>
