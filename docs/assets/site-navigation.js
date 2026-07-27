@@ -17,7 +17,9 @@
         target_keyword: appStoreLink.dataset.targetKeyword || '',
         search_intent: appStoreLink.dataset.searchIntent || '',
         cta_position: appStoreLink.dataset.ctaPosition || '',
-        destination: 'app_store'
+        destination: 'app_store',
+        transport_type: 'beacon',
+        event_timeout: 2000
       });
     }
 
@@ -31,6 +33,28 @@
       });
     }
   });
+
+  if (typeof window.gtag === 'function' && document.referrer) {
+    try {
+      var referralHost = new URL(document.referrer).hostname.toLowerCase();
+      var aiReferralSources = [
+        { match: 'chatgpt.com', source: 'chatgpt' },
+        { match: 'perplexity.ai', source: 'perplexity' },
+        { match: 'claude.ai', source: 'claude' },
+        { match: 'gemini.google.com', source: 'gemini' },
+        { match: 'copilot.microsoft.com', source: 'microsoft-copilot' }
+      ];
+      var aiReferral = aiReferralSources.find(function (candidate) {
+        return referralHost === candidate.match || referralHost.endsWith('.' + candidate.match);
+      });
+      if (aiReferral) {
+        window.gtag('event', 'ai_referral_landing', {
+          ai_source: aiReferral.source,
+          landing_path: window.location.pathname
+        });
+      }
+    } catch (error) {}
+  }
 
   var header = document.querySelector('[data-site-header]');
   if (!header) return;
