@@ -4555,78 +4555,35 @@
 
     .system-learn-more {
       display: flex;
-      gap: 24px;
       align-items: center;
-      justify-content: space-between;
-      margin-top: 22px;
-      padding: 22px 24px;
-      border: 1px solid rgba(0, 122, 255, 0.12);
-      border-radius: 24px;
-      background:
-        radial-gradient(circle at 92% 0%, rgba(135, 84, 255, 0.12), transparent 36%),
-        linear-gradient(135deg, rgba(0, 122, 255, 0.07), rgba(255, 255, 255, 0.94));
-    }
-
-    .system-learn-more h3 {
-      margin: 3px 0 5px;
-      font-size: clamp(1.25rem, 2.4vw, 1.7rem);
-      letter-spacing: -0.025em;
-    }
-
-    .system-learn-more p {
-      max-width: 58ch;
-      margin: 0;
-      color: var(--muted);
-      font-size: 0.92rem;
-    }
-
-    .system-learn-more-kicker {
-      color: #0068d7;
-      font-size: 0.72rem;
-      font-weight: 850;
-      letter-spacing: 0.075em;
-      text-transform: uppercase;
+      justify-content: center;
+      margin-top: 20px;
     }
 
     .system-learn-more-link {
       display: inline-flex;
       min-height: 44px;
-      flex: 0 0 auto;
       align-items: center;
       gap: 8px;
-      padding: 0 16px;
-      border: 1px solid rgba(0, 122, 255, 0.16);
+      padding: 0 18px;
+      border: 1px solid rgba(0, 122, 255, 0.18);
       border-radius: 999px;
-      color: #0068d7;
-      background: #ffffff;
-      box-shadow: 0 10px 26px rgba(0, 91, 191, 0.1);
+      color: #ffffff;
+      background: #007aff;
+      box-shadow: 0 8px 20px rgba(0, 91, 191, 0.16);
       font-size: 0.88rem;
       font-weight: 820;
       text-decoration: none;
     }
 
     .system-learn-more-link:hover {
-      background: #f7fbff;
+      background: #006ee6;
       transform: translateY(-1px);
     }
 
     .system-learn-more-link:focus-visible {
       outline: 3px solid rgba(0, 95, 199, 0.42);
       outline-offset: 3px;
-    }
-
-    @media (max-width: 700px) {
-      .system-learn-more {
-        display: grid;
-        gap: 16px;
-        padding: 20px;
-        border-radius: 22px;
-      }
-
-      .system-learn-more-link {
-        width: 100%;
-        justify-content: center;
-      }
     }
 
   </style>
@@ -4834,14 +4791,9 @@
 
         </div>
 
-        <aside class="system-learn-more" aria-labelledby="system-learn-more-title">
-          <div>
-            <span class="system-learn-more-kicker">Want the complete walkthrough?</span>
-            <h3 id="system-learn-more-title">See how Loom works as a life management app.</h3>
-            <p>Explore the full workflow, released features, real screenshots, ideal use cases, and where Loom fits best.</p>
-          </div>
-          <a class="system-learn-more-link" href="/life-management-app/" data-article-link data-source-slug="homepage" data-destination-slug="life-management-app" data-content-cluster="life-management" data-link-position="system-footer">Explore the Life Management App <span aria-hidden="true">→</span></a>
-        </aside>
+        <div class="system-learn-more">
+          <a class="system-learn-more-link" href="/life-management-app/" data-article-link data-source-slug="homepage" data-destination-slug="life-management-app" data-content-cluster="life-management" data-link-position="system-footer">Learn more about how Loom works <span aria-hidden="true">→</span></a>
+        </div>
       </div>
     </section>
 
