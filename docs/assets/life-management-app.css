@@ -1,9 +1,13 @@
 .life-hero-visual {
   position: relative;
   display: grid;
-  min-height: 620px;
+  grid-template-rows: auto auto;
+  gap: 12px;
+  min-height: 700px;
+  align-content: center;
   place-items: center;
   margin: 0;
+  padding: 28px 20px 20px;
   overflow: hidden;
   border: 1px solid rgba(17, 17, 17, 0.08);
   border-radius: 42px;
@@ -26,10 +30,10 @@
 }
 
 .life-hero-visual figcaption {
-  position: absolute;
-  right: 24px;
-  bottom: 20px;
-  left: 24px;
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  padding-inline: 8px;
   color: #5d6470;
   font-size: 0.78rem;
   line-height: 1.4;
@@ -132,17 +136,16 @@
 }
 
 .life-card-icon {
+  position: relative;
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 50px;
+  height: 42px;
   margin-bottom: 22px;
+  overflow: hidden;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 13px;
   color: #0068d7;
   background: rgba(0, 122, 255, 0.1);
-  font-size: 1.2rem;
-  font-weight: 760;
-  line-height: 1;
 }
 
 .life-capability-grid .card:nth-child(2) .life-card-icon,
@@ -160,6 +163,166 @@
 .life-capability-grid .card:nth-child(4) .life-card-icon {
   color: #c75b18;
   background: rgba(255, 138, 61, 0.13);
+}
+
+.life-icon-purpose::before {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: conic-gradient(
+    #1d1d1f 0deg 84deg,
+    transparent 84deg 92deg,
+    #1d1d1f 92deg 176deg,
+    transparent 176deg 184deg,
+    rgba(29, 29, 31, 0.28) 184deg 268deg,
+    transparent 268deg 276deg,
+    #1d1d1f 276deg 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  content: "";
+}
+
+.life-icon-purpose i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #1d1d1f;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.72);
+}
+
+.life-icon-radar::before {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 1.5px solid rgba(35, 83, 60, 0.4);
+  transform: rotate(45deg);
+  content: "";
+}
+
+.life-icon-radar::after {
+  position: absolute;
+  width: 21px;
+  height: 21px;
+  background: conic-gradient(from 45deg, #34c759, #007aff, #ff3b30, #ff9500, #34c759);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  opacity: 0.72;
+  content: "";
+}
+
+.life-icon-radar i {
+  position: relative;
+  z-index: 2;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(17, 17, 17, 0.12);
+}
+
+.life-icon-goal::before {
+  position: absolute;
+  width: 23px;
+  height: 23px;
+  border: 2px solid #7243de;
+  border-radius: 50%;
+  content: "";
+}
+
+.life-icon-goal i,
+.life-icon-goal i::after {
+  position: absolute;
+  width: 33px;
+  height: 2px;
+  border-radius: 999px;
+  background: #7243de;
+  content: "";
+}
+
+.life-icon-goal i::after {
+  transform: rotate(90deg);
+}
+
+.life-icon-action::before {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #ff8a3d;
+  box-shadow: 0 6px 13px rgba(255, 138, 61, 0.24);
+  content: "";
+}
+
+.life-icon-action::after {
+  position: absolute;
+  margin-left: 3px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid #ffffff;
+  content: "";
+}
+
+.life-icon-wins i {
+  position: absolute;
+  width: 20px;
+  height: 29px;
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow: 0 5px 9px rgba(17, 17, 17, 0.12);
+}
+
+.life-icon-wins i::after {
+  position: absolute;
+  top: 9px;
+  left: 6px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  transform: rotate(45deg);
+  content: "";
+}
+
+.life-icon-wins i:nth-child(1) {
+  left: 25px;
+  z-index: 3;
+  background: rgba(52, 199, 89, 0.78);
+}
+
+.life-icon-wins i:nth-child(2) {
+  left: 16px;
+  z-index: 2;
+  background: rgba(255, 149, 0, 0.7);
+}
+
+.life-icon-wins i:nth-child(3) {
+  left: 7px;
+  z-index: 1;
+  background: rgba(0, 122, 255, 0.65);
+}
+
+.life-icon-capture::before {
+  width: 28px;
+  height: 28px;
+  background:
+    linear-gradient(#7243de, #7243de) left top / 9px 2px no-repeat,
+    linear-gradient(#7243de, #7243de) left top / 2px 9px no-repeat,
+    linear-gradient(#7243de, #7243de) right top / 9px 2px no-repeat,
+    linear-gradient(#7243de, #7243de) right top / 2px 9px no-repeat,
+    linear-gradient(#7243de, #7243de) left bottom / 9px 2px no-repeat,
+    linear-gradient(#7243de, #7243de) left bottom / 2px 9px no-repeat,
+    linear-gradient(#7243de, #7243de) right bottom / 9px 2px no-repeat,
+    linear-gradient(#7243de, #7243de) right bottom / 2px 9px no-repeat;
+  content: "";
+}
+
+.life-icon-capture::after {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  background:
+    linear-gradient(#7243de, #7243de) center / 15px 2px no-repeat,
+    linear-gradient(#7243de, #7243de) center / 2px 15px no-repeat;
+  content: "";
 }
 
 .life-story-panel {
@@ -378,7 +541,7 @@
 @media (max-width: 860px) {
   .life-hero-visual {
     width: min(100%, 560px);
-    min-height: 570px;
+    min-height: 680px;
     margin-inline: auto;
   }
 
@@ -406,7 +569,8 @@
 
 @media (max-width: 620px) {
   .life-hero-visual {
-    min-height: 510px;
+    min-height: 570px;
+    padding: 22px 14px 16px;
     border-radius: 30px;
   }
 
@@ -416,7 +580,7 @@
   }
 
   .life-hero-device {
-    --device-width: 238px;
+    --device-width: 218px;
   }
 
   .life-float-card {
