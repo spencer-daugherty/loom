@@ -108,21 +108,21 @@
 .ambassador-banner {
   position: relative;
   z-index: 1100;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
-  min-height: 48px;
-  border-bottom: 1px solid rgba(0, 122, 255, 0.12);
-  color: #17233a;
-  background: #f2f7ff;
+  min-height: 44px;
+  border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+  color: #303846;
+  background: #f8f9fb;
 }
 
 .ambassador-banner-link {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  min-height: 44px;
   min-width: 0;
-  gap: 10px;
-  padding: 7px 16px 7px 60px;
+  gap: 8px;
+  padding: 7px 52px;
   color: inherit;
   text-decoration: none;
 }
@@ -131,27 +131,28 @@
   min-width: 0;
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.ambassador-banner-copy strong {
-  font-size: 0.88rem;
-  font-weight: 760;
-  letter-spacing: -0.005em;
+  font-size: 0.84rem;
+  font-weight: 680;
+  letter-spacing: -0.004em;
 }
 
 .ambassador-banner-action {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 5px;
   color: #0068d7;
-  font-size: 0.84rem;
-  font-weight: 780;
+  font-size: 0.82rem;
+  font-weight: 740;
 }
 
+.ambassador-banner-action > span { margin-left: 4px; }
 .ambassador-banner-link:hover .ambassador-banner-action { color: #0056b3; }
+.ambassador-banner-link:focus-visible { outline: 3px solid #005fc7; outline-offset: -4px; }
 
 .ambassador-banner-dismiss {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: grid;
   width: 44px;
   height: 100%;
@@ -297,23 +298,18 @@
 }
 
 @media (max-width: 640px) {
-  .ambassador-banner {
-    grid-template-columns: minmax(0, 1fr) 42px;
-    min-height: 48px;
-  }
-
   .ambassador-banner-link {
-    gap: 8px;
-    padding: 7px 8px 7px 50px;
+    gap: 7px;
+    padding-inline: 44px;
   }
 
-  .ambassador-banner-copy strong { font-size: 0.8rem; }
-  .ambassador-banner-action { font-size: 0.78rem; }
+  .ambassador-banner-copy { font-size: 0.78rem; }
+  .ambassador-banner-action { font-size: 0.76rem; }
   .ambassador-banner-dismiss { width: 42px; }
 }
 
 @media (max-width: 390px) {
-  .ambassador-banner-link { padding-left: 10px; }
+  .ambassador-banner-link { padding-inline: 42px; }
   .ambassador-banner-action > span { display: none; }
 }
 
