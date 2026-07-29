@@ -1,13 +1,12 @@
 .life-hero-visual {
   position: relative;
   display: grid;
-  grid-template-rows: auto auto;
-  gap: 12px;
-  min-height: 700px;
+  grid-template-rows: auto;
+  min-height: 650px;
   align-content: center;
   place-items: center;
   margin: 0;
-  padding: 28px 20px 20px;
+  padding: 20px;
   overflow: hidden;
   border: 1px solid rgba(17, 17, 17, 0.08);
   border-radius: 42px;
@@ -27,17 +26,6 @@
   background: rgba(255, 255, 255, 0.44);
   transform: rotate(24deg);
   content: "";
-}
-
-.life-hero-visual figcaption {
-  position: relative;
-  z-index: 5;
-  width: 100%;
-  padding-inline: 8px;
-  color: #5d6470;
-  font-size: 0.78rem;
-  line-height: 1.4;
-  text-align: center;
 }
 
 .life-device {
@@ -161,71 +149,58 @@
 }
 
 .life-capability-grid .card:nth-child(4) .life-card-icon {
-  color: #c75b18;
-  background: rgba(255, 138, 61, 0.13);
+  color: #0068d7;
+  background: rgba(0, 122, 255, 0.1);
 }
 
 .life-icon-purpose::before {
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  background: conic-gradient(
-    #1d1d1f 0deg 84deg,
-    transparent 84deg 92deg,
-    #1d1d1f 92deg 176deg,
-    transparent 176deg 184deg,
-    rgba(29, 29, 31, 0.28) 184deg 268deg,
-    transparent 268deg 276deg,
-    #1d1d1f 276deg 360deg
-  );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-  content: "";
+  color: #1d1d1f;
+  font-size: 35px;
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: -0.08em;
+  content: "∞";
 }
 
 .life-icon-purpose i {
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #1d1d1f;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.72);
+  display: none;
 }
 
 .life-icon-radar::before {
   position: absolute;
   width: 26px;
   height: 26px;
-  border: 1.5px solid rgba(35, 83, 60, 0.4);
+  border: 1.5px solid rgba(60, 60, 67, 0.34);
   transform: rotate(45deg);
   content: "";
 }
 
 .life-icon-radar::after {
   position: absolute;
-  width: 21px;
-  height: 21px;
-  background: conic-gradient(from 45deg, #34c759, #007aff, #ff3b30, #ff9500, #34c759);
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  opacity: 0.72;
+  width: 20px;
+  height: 20px;
+  background: conic-gradient(from 45deg, #007aff, #ff9500, #ff3b30, #34c759, #007aff);
+  clip-path: polygon(50% 12%, 88% 50%, 50% 78%, 24% 50%);
+  opacity: 0.66;
   content: "";
 }
 
 .life-icon-radar i {
   position: relative;
   z-index: 2;
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 0 0 1px rgba(17, 17, 17, 0.12);
+  background: #007aff;
+  box-shadow: 8px 8px 0 #ff9500, 0 16px 0 #ff3b30, -8px 8px 0 #34c759;
+  transform: translateY(-8px);
 }
 
 .life-icon-goal::before {
   position: absolute;
   width: 23px;
   height: 23px;
-  border: 2px solid #7243de;
+  border: 2px solid #1d1d1f;
   border-radius: 50%;
   content: "";
 }
@@ -236,7 +211,7 @@
   width: 33px;
   height: 2px;
   border-radius: 999px;
-  background: #7243de;
+  background: #1d1d1f;
   content: "";
 }
 
@@ -248,8 +223,8 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #ff8a3d;
-  box-shadow: 0 6px 13px rgba(255, 138, 61, 0.24);
+  background: #007aff;
+  box-shadow: 0 6px 13px rgba(0, 122, 255, 0.22);
   content: "";
 }
 
@@ -285,33 +260,33 @@
 .life-icon-wins i:nth-child(1) {
   left: 25px;
   z-index: 3;
-  background: rgba(52, 199, 89, 0.78);
+  background: #34c759;
 }
 
 .life-icon-wins i:nth-child(2) {
   left: 16px;
   z-index: 2;
-  background: rgba(255, 149, 0, 0.7);
+  background: #ff9500;
 }
 
 .life-icon-wins i:nth-child(3) {
   left: 7px;
   z-index: 1;
-  background: rgba(0, 122, 255, 0.65);
+  background: #007aff;
 }
 
 .life-icon-capture::before {
   width: 28px;
   height: 28px;
   background:
-    linear-gradient(#7243de, #7243de) left top / 9px 2px no-repeat,
-    linear-gradient(#7243de, #7243de) left top / 2px 9px no-repeat,
-    linear-gradient(#7243de, #7243de) right top / 9px 2px no-repeat,
-    linear-gradient(#7243de, #7243de) right top / 2px 9px no-repeat,
-    linear-gradient(#7243de, #7243de) left bottom / 9px 2px no-repeat,
-    linear-gradient(#7243de, #7243de) left bottom / 2px 9px no-repeat,
-    linear-gradient(#7243de, #7243de) right bottom / 9px 2px no-repeat,
-    linear-gradient(#7243de, #7243de) right bottom / 2px 9px no-repeat;
+    linear-gradient(#1d1d1f, #1d1d1f) left top / 9px 2px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) left top / 2px 9px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) right top / 9px 2px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) right top / 2px 9px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) left bottom / 9px 2px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) left bottom / 2px 9px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) right bottom / 9px 2px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) right bottom / 2px 9px no-repeat;
   content: "";
 }
 
@@ -320,9 +295,15 @@
   width: 15px;
   height: 15px;
   background:
-    linear-gradient(#7243de, #7243de) center / 15px 2px no-repeat,
-    linear-gradient(#7243de, #7243de) center / 2px 15px no-repeat;
+    linear-gradient(#1d1d1f, #1d1d1f) center / 15px 2px no-repeat,
+    linear-gradient(#1d1d1f, #1d1d1f) center / 2px 15px no-repeat;
   content: "";
+}
+
+.life-capability-grid .card:nth-child(3) .life-card-icon,
+.life-capability-grid .card:nth-child(6) .life-card-icon {
+  color: #1d1d1f;
+  background: rgba(29, 29, 31, 0.06);
 }
 
 .life-story-panel {
@@ -507,19 +488,19 @@
 .life-wins-stack span:nth-child(1) {
   left: 36px;
   z-index: 3;
-  background: rgba(255, 138, 61, 0.78);
+  background: #ff8a3d;
 }
 
 .life-wins-stack span:nth-child(2) {
   left: 18px;
   z-index: 2;
-  background: rgba(46, 167, 109, 0.66);
+  background: #2ea76d;
 }
 
 .life-wins-stack span:nth-child(3) {
   left: 0;
   z-index: 1;
-  background: rgba(0, 122, 255, 0.6);
+  background: #007aff;
 }
 
 .life-ai-note {
@@ -541,7 +522,7 @@
 @media (max-width: 860px) {
   .life-hero-visual {
     width: min(100%, 560px);
-    min-height: 680px;
+    min-height: 640px;
     margin-inline: auto;
   }
 
@@ -569,7 +550,7 @@
 
 @media (max-width: 620px) {
   .life-hero-visual {
-    min-height: 570px;
+    min-height: 530px;
     padding: 22px 14px 16px;
     border-radius: 30px;
   }
