@@ -306,6 +306,86 @@
   background: rgba(29, 29, 31, 0.06);
 }
 
+.answer-update,
+.comparison-note {
+  color: #687180;
+  font-size: 0.86rem;
+}
+
+.answer-update {
+  margin: 18px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid rgba(0, 122, 255, 0.14);
+}
+
+.fit-table-wrap {
+  width: min(calc(100vw - 28px), 1080px);
+  margin: 28px 50% 20px;
+  overflow-x: auto;
+  border: 1px solid rgba(17, 17, 17, 0.09);
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 22px 64px rgba(26, 45, 75, 0.08);
+  transform: translateX(-50%);
+  -webkit-overflow-scrolling: touch;
+}
+
+.fit-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  line-height: 1.48;
+}
+
+.fit-table th,
+.fit-table td {
+  padding: 17px 18px;
+  border-right: 1px solid rgba(17, 17, 17, 0.08);
+  border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.fit-table th:last-child,
+.fit-table td:last-child {
+  border-right: 0;
+}
+
+.fit-table tr:last-child th,
+.fit-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.fit-table thead th {
+  color: #3b4350;
+  background: #f4f7fb;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fit-table tbody th {
+  width: 116px;
+  color: #111111;
+  background: #fbfaf7;
+  font-size: 0.98rem;
+}
+
+.fit-table a {
+  color: #005ec4;
+  text-underline-offset: 3px;
+}
+
+.fit-table-loom th,
+.fit-table-loom td {
+  background: linear-gradient(135deg, rgba(0, 122, 255, 0.1), rgba(255, 255, 255, 0.96));
+}
+
+.comparison-note {
+  margin-bottom: 34px;
+}
+
 .life-story-panel {
   position: relative;
   display: grid;
