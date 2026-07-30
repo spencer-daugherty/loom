@@ -17,7 +17,10 @@
         target_keyword: appStoreLink.dataset.targetKeyword || '',
         search_intent: appStoreLink.dataset.searchIntent || '',
         cta_position: appStoreLink.dataset.ctaPosition || '',
-        destination: 'app_store',
+        article_slug: appStoreLink.dataset.contentSlug || '',
+        position_id: appStoreLink.dataset.positionId || '',
+        cta_placement: appStoreLink.dataset.ctaPosition || '',
+        destination: appStoreLink.dataset.destination || 'app_store',
         transport_type: 'beacon',
         event_timeout: 2000
       });
@@ -29,7 +32,11 @@
         source_slug: articleLink.dataset.sourceSlug || '',
         destination_slug: articleLink.dataset.destinationSlug || '',
         content_cluster: articleLink.dataset.contentCluster || '',
-        link_position: articleLink.dataset.linkPosition || ''
+        link_position: articleLink.dataset.linkPosition || '',
+        article_slug: articleLink.dataset.sourceSlug || '',
+        position_id: articleLink.dataset.positionId || '',
+        cta_placement: articleLink.dataset.linkPosition || '',
+        destination: articleLink.dataset.destination || articleLink.getAttribute('href') || ''
       });
     }
   });
