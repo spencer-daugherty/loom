@@ -1,3 +1,34 @@
+.life-fit-snapshot {
+  display: grid;
+  gap: 9px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.life-fit-snapshot li {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.life-fit-snapshot strong {
+  color: #111111;
+  font-size: 0.78rem;
+}
+
+.life-fit-snapshot span {
+  color: #5d6470;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .life-hero-visual {
   position: relative;
   display: grid;
@@ -629,6 +660,11 @@
 }
 
 @media (max-width: 620px) {
+  .life-fit-snapshot li {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
   .life-hero-visual {
     min-height: 530px;
     padding: 22px 14px 16px;
