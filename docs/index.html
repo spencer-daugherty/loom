@@ -13,7 +13,7 @@
   <meta property="og:title" content="Loom Life Manager for iPhone &amp; iPad | Goals, Habits &amp; AI">
   <meta property="og:description" content="Loom connects purpose, goals, action plans, Little Wins, reflection, Apple Health signals, and LoomAI in one life management app for iPhone and iPad.">
   <meta property="og:url" content="https://loomlife.us/">
-  <meta property="og:updated_time" content="2026-08-01T12:00:00-04:00">
+  <meta property="og:updated_time" content="2026-08-11T09:00:00-04:00">
   <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:url" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:secure_url" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
@@ -5425,10 +5425,10 @@
             <div class="journal-meta">
               <span class="journal-tag">Comparison</span>
               <span>Goals and action</span>
-              <time datetime="2026-07-27">July 27, 2026</time>
+              <time datetime="2026-08-11">Updated August 11, 2026</time>
             </div>
-            <h3><a href="/articles/goals-vs-habits-vs-tasks/" data-article-link data-source-slug="homepage" data-destination-slug="goals-vs-habits-vs-tasks" data-content-cluster="goals-action" data-link-position="latest-articles">Goals, habits, and tasks do different jobs</a></h3>
-            <p>See what each one is for and how they work together without becoming one larger list.</p>
+            <h3><a href="/articles/goals-vs-habits-vs-tasks/" data-article-link data-source-slug="homepage" data-destination-slug="goals-vs-habits-vs-tasks" data-content-cluster="goals-action" data-link-position="latest-articles" data-position-id="goals-habits-tasks">Goals vs. habits vs. tasks: what is the difference?</a></h3>
+            <p>Compare outcomes, finite work, and repeatable actions, then see how they connect in one practical plan.</p>
           </article>
 
           <article class="journal-item">
@@ -5906,23 +5906,6 @@
 <script>
   document.addEventListener('click', function(event) {
     if (typeof gtag !== 'function') return;
-
-    var appStoreLink = event.target.closest('[data-app-store-cta]');
-    if (appStoreLink) {
-      gtag('event', 'app_store_click', {
-        page_type: appStoreLink.dataset.pageType || '',
-        content_slug: appStoreLink.dataset.contentSlug || '',
-        content_cluster: appStoreLink.dataset.contentCluster || '',
-        target_keyword: appStoreLink.dataset.targetKeyword || '',
-        search_intent: appStoreLink.dataset.searchIntent || '',
-        competitor: appStoreLink.dataset.competitor || '',
-        cta_position: appStoreLink.dataset.ctaPosition || '',
-        article_slug: appStoreLink.dataset.contentSlug || '',
-        cta_placement: appStoreLink.dataset.ctaPosition || '',
-        destination: appStoreLink.dataset.destination || 'app_store',
-        transport_type: 'beacon'
-      });
-    }
 
     var foundingMemberLink = event.target.closest('[data-founding-member-cta]');
     if (foundingMemberLink) {

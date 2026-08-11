@@ -298,6 +298,53 @@ h1, h2, h3 { text-wrap: balance; }
   font-size: 1.45rem;
 }
 
+.article-table-wrap {
+  margin: 26px 0 34px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 16px 46px rgba(17, 17, 17, 0.05);
+  -webkit-overflow-scrolling: touch;
+}
+
+.article-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 0.96rem;
+  line-height: 1.48;
+}
+
+.article-table th,
+.article-table td {
+  padding: 15px 17px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.article-table th:last-child,
+.article-table td:last-child { border-right: 0; }
+
+.article-table tr:last-child th,
+.article-table tr:last-child td { border-bottom: 0; }
+
+.article-table thead th {
+  color: #245f95;
+  background: rgba(0, 122, 255, 0.07);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.article-table tbody th {
+  color: var(--ink);
+  background: rgba(245, 243, 239, 0.56);
+}
+
 .step-list {
   display: grid;
   gap: 14px;
