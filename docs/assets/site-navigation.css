@@ -324,3 +324,70 @@
   .site-menu-backdrop,
   .site-mobile-panel { transition: none; }
 }
+
+/* Progressive motion: JavaScript opts capable devices in after content is ready. */
+@media (prefers-reduced-motion: no-preference) {
+  html.site-motion-ready.site-motion-full .site-motion-item {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+    transition:
+      opacity 620ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--site-motion-delay, 0ms),
+      transform 620ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--site-motion-delay, 0ms);
+  }
+
+  html.site-motion-ready.site-motion-lite .site-motion-item {
+    opacity: 0;
+    transition: opacity 220ms ease-out var(--site-motion-delay, 0ms);
+  }
+
+  html.site-motion-ready .site-motion-item.is-visible {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  html.site-motion-ready.site-motion-full .site-motion-child {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.992);
+    transition:
+      opacity 480ms ease-out var(--site-motion-child-delay, 90ms),
+      transform 560ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--site-motion-child-delay, 90ms);
+  }
+
+  html.site-motion-ready.site-motion-full .site-motion-item.is-visible .site-motion-child {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  html.site-motion-full .site-brand img,
+  html.site-motion-full .site-header-cta,
+  html.site-motion-full .site-mobile-cta,
+  html.site-motion-full .site-primary-links a {
+    transition: transform 180ms ease, color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  html.site-motion-full .site-brand:hover img {
+    transform: scale(1.045);
+  }
+
+  html.site-motion-full .site-header-cta:hover,
+  html.site-motion-full .site-mobile-cta:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 15px 32px rgba(0, 122, 255, 0.26);
+  }
+
+  html.site-motion-full .site-primary-links a:hover {
+    transform: translateY(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce), (update: slow) {
+  .site-motion-item,
+  .site-motion-child {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}

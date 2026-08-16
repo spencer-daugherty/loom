@@ -2992,22 +2992,22 @@
       }
     }
 
-    @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-      .card,
-      .plan-card,
-      .ecosystem-card,
-      .carousel-arrow {
+    @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+      .motion-full .card,
+      .motion-full .plan-card,
+      .motion-full .ecosystem-card,
+      .motion-full .carousel-arrow {
         transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 260ms ease;
       }
 
-      .card:hover,
-      .plan-card:hover,
-      .ecosystem-card:hover {
+      .motion-full .card:hover,
+      .motion-full .plan-card:hover,
+      .motion-full .ecosystem-card:hover {
         transform: translateY(-3px);
         box-shadow: 0 24px 65px rgba(29, 29, 31, 0.095);
       }
 
-      .plan-card.featured:hover {
+      .motion-full .plan-card.featured:hover {
         box-shadow: 0 34px 78px rgba(29, 29, 31, 0.23);
       }
     }
@@ -3023,23 +3023,224 @@
       }
     }
 
+    @keyframes ecosystem-glow-flow {
+      from { stroke-dashoffset: 0; }
+      to { stroke-dashoffset: -100; }
+    }
+
+    @keyframes ecosystem-icon-settle {
+      0% { opacity: 0; transform: translate3d(0, 7px, 0) scale(0.82); }
+      68% { opacity: 1; transform: translate3d(0, -1px, 0) scale(1.06); }
+      100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    }
+
+    @keyframes ecosystem-radar-bloom {
+      0% { opacity: 0; transform: scale(0.68) rotate(-5deg); }
+      72% { opacity: 1; transform: scale(1.035) rotate(0.5deg); }
+      100% { opacity: 1; transform: scale(1) rotate(0); }
+    }
+
+    @keyframes graphic-settle {
+      from { opacity: 0; transform: translate3d(0, 7px, 0) scale(0.96); }
+      to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    }
+
     @media (prefers-reduced-motion: no-preference) {
-      .motion-ready .hero::before {
+      .motion-ready.motion-full .hero::before {
         animation: hero-visual-in 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
       }
 
-      .motion-ready .reveal-item {
+      .motion-ready.motion-full .reveal-item {
         opacity: 0;
-        transform: translateY(18px);
+        transform: translate3d(0, 18px, 0);
         transition:
           opacity 680ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--reveal-delay, 0ms),
           transform 680ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--reveal-delay, 0ms);
       }
 
+      .motion-ready.motion-lite .reveal-item {
+        opacity: 0;
+        transition: opacity 220ms ease-out var(--reveal-delay, 0ms);
+      }
+
       .motion-ready .reveal-item.is-visible {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
       }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item:not(.is-visible) .ecosystem-route {
+        opacity: 0;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item.is-visible .ecosystem-route {
+        opacity: 0.54;
+        stroke-dashoffset: 0;
+        transition:
+          stroke-dashoffset 960ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--route-delay, 120ms),
+          opacity 420ms ease-out var(--route-delay, 120ms);
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item:not(.is-visible) .ecosystem-route-glow {
+        opacity: 0;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item.is-visible .ecosystem-route-glow {
+        opacity: 0.16;
+        transition: opacity 520ms ease-out var(--route-glow-delay, 620ms);
+      }
+
+      .motion-ready.motion-full .ecosystem-route-glow.is-flowing {
+        animation: ecosystem-glow-flow var(--route-flow-duration, 4.6s) linear var(--route-flow-delay, 0s) 1;
+        animation-play-state: paused;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.is-motion-active .ecosystem-route-glow.is-flowing {
+        animation-play-state: running;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item:not(.is-visible) :is(.passion-circle, .area-chip, .radar, .system-node) {
+        opacity: 0;
+        transform: translate3d(0, 8px, 0) scale(0.97);
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item.is-visible :is(.passion-circle, .area-chip, .radar, .system-node) {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+        transition:
+          opacity 440ms ease-out var(--ecosystem-delay, 150ms),
+          transform 560ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--ecosystem-delay, 150ms);
+      }
+
+      .motion-ready.motion-full .passion-circle:nth-child(2),
+      .motion-ready.motion-full .area-chip:nth-child(2),
+      .motion-ready.motion-full .system-node:nth-child(2) {
+        --ecosystem-delay: 220ms;
+      }
+
+      .motion-ready.motion-full .passion-circle:nth-child(3),
+      .motion-ready.motion-full .area-chip:nth-child(3),
+      .motion-ready.motion-full .system-node:nth-child(3) {
+        --ecosystem-delay: 290ms;
+      }
+
+      .motion-ready.motion-full .passion-circle:nth-child(4),
+      .motion-ready.motion-full .area-chip:nth-child(4) {
+        --ecosystem-delay: 360ms;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item.is-visible .radar-fill {
+        animation: ecosystem-radar-bloom 720ms cubic-bezier(0.2, 0.8, 0.2, 1) 280ms both;
+        transform-origin: center;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item.is-visible .system-node > svg {
+        animation: ecosystem-icon-settle 560ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--ecosystem-delay, 360ms) backwards;
+        transform-origin: center;
+      }
+
+      .motion-ready.motion-full .ecosystem-card.reveal-item.is-visible .ecosystem-little-card {
+        animation: ecosystem-icon-settle 520ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--little-card-delay, 360ms) backwards;
+        transform-origin: center bottom;
+      }
+
+      .motion-ready.motion-full .ecosystem-little-card:nth-child(2) { --little-card-delay: 410ms; }
+      .motion-ready.motion-full .ecosystem-little-card:nth-child(3) { --little-card-delay: 460ms; }
+      .motion-ready.motion-full .ecosystem-little-card:nth-child(4) { --little-card-delay: 510ms; }
+
+      .motion-ready.motion-full .phone-stage {
+        perspective: 1100px;
+      }
+
+      .motion-ready.motion-full .phone-shell {
+        transform: perspective(1100px) rotateX(var(--phone-tilt-x, 0deg)) rotateY(var(--phone-tilt-y, 0deg)) translateZ(0);
+        transform-style: preserve-3d;
+        transition: transform 260ms ease-out;
+      }
+
+      .motion-ready.motion-full .phone-stage.is-interacting .phone-shell {
+        transition-duration: 90ms;
+      }
+
+      .motion-ready.motion-full .plans.reveal-item:not(.is-visible) .plan-card,
+      .motion-ready.motion-full .comparison-intro-grid.reveal-item:not(.is-visible) .comparison-point,
+      .motion-ready.motion-full #features .grid.reveal-item:not(.is-visible) .card,
+      .motion-ready.motion-full .journal-grid.reveal-item:not(.is-visible) .journal-item {
+        opacity: 0;
+        transform: translate3d(0, 12px, 0) scale(0.992);
+      }
+
+      .motion-ready.motion-full .plans.reveal-item.is-visible .plan-card,
+      .motion-ready.motion-full .comparison-intro-grid.reveal-item.is-visible .comparison-point,
+      .motion-ready.motion-full #features .grid.reveal-item.is-visible .card,
+      .motion-ready.motion-full .journal-grid.reveal-item.is-visible .journal-item {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+        transition:
+          opacity 480ms ease-out var(--card-delay, 100ms),
+          transform 580ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--card-delay, 100ms);
+      }
+
+      .motion-ready.motion-full :is(.plan-card, .comparison-point, #features .card, .journal-item):nth-child(2) {
+        --card-delay: 170ms;
+      }
+
+      .motion-ready.motion-full :is(.plan-card, .comparison-point, #features .card, .journal-item):nth-child(3) {
+        --card-delay: 240ms;
+      }
+
+      .motion-ready.motion-full :is(.plan-card, .comparison-point, #features .card, .journal-item):nth-child(4) {
+        --card-delay: 310ms;
+      }
+
+      .motion-ready.motion-full #features .grid.reveal-item.is-visible .step-icon,
+      .motion-ready.motion-full #integrations .grid.reveal-item.is-visible .integration-art,
+      .motion-ready.motion-full .comparison-intro-grid.reveal-item.is-visible .comparison-simple-graphic {
+        animation: graphic-settle 620ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--graphic-delay, 180ms) backwards;
+        transform-origin: center;
+      }
+
+      .motion-ready.motion-full #features .card:nth-child(2) .step-icon,
+      .motion-ready.motion-full #integrations .card:nth-child(2) .integration-art,
+      .motion-ready.motion-full .comparison-point:nth-child(2) .comparison-simple-graphic {
+        --graphic-delay: 250ms;
+      }
+
+      .motion-ready.motion-full #features .card:nth-child(3) .step-icon,
+      .motion-ready.motion-full .comparison-point:nth-child(3) .comparison-simple-graphic {
+        --graphic-delay: 320ms;
+      }
+
+      .motion-ready.motion-full #features .card:nth-child(4) .step-icon {
+        --graphic-delay: 390ms;
+      }
+    }
+
+    @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+      .motion-full .system-node > svg,
+      .motion-full #features .step-icon,
+      .motion-full .comparison-simple-graphic {
+        transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+
+      .motion-full .system-node:hover > svg,
+      .motion-full #features .card:hover .step-icon {
+        transform: scale(1.08) rotate(-2deg);
+      }
+
+      .motion-full .comparison-point:hover .comparison-simple-graphic {
+        transform: scale(1.025);
+      }
+
+      .motion-full .ecosystem-little-card {
+        transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+
+      .motion-full .system-node:hover .ecosystem-little-card:nth-child(1) { transform: translate3d(2px, -2px, 0); }
+      .motion-full .system-node:hover .ecosystem-little-card:nth-child(2) { transform: translate3d(1px, -1px, 0); }
+      .motion-full .system-node:hover .ecosystem-little-card:nth-child(3) { transform: translate3d(-1px, 0, 0); }
+      .motion-full .system-node:hover .ecosystem-little-card:nth-child(4) { transform: translate3d(-2px, 1px, 0); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -3053,6 +3254,22 @@
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+      }
+    }
+
+    @media (update: slow) {
+      .reveal-item,
+      .ecosystem-route,
+      .ecosystem-route-glow,
+      .passion-circle,
+      .area-chip,
+      .radar,
+      .system-node,
+      .phone-shell {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+        animation: none !important;
       }
     }
 
@@ -4588,7 +4805,7 @@
     }
 
   </style>
-  <link rel="stylesheet" href="/assets/site-navigation.css?v=20260729-2">
+  <link rel="stylesheet" href="/assets/site-navigation.css?v=20260816-1">
   <link rel="stylesheet" href="/assets/comparison-graphics.css?v=20260722-4">
 </head>
 <body>
@@ -5028,7 +5245,7 @@
           <div>
             <h2>Research-inspired, practically designed.</h2>
             <p>
-              Loom is an independent product built around a simple belief: daily action should stay connected to what matters.
+              Loom is independently designed around a simple belief: daily action should stay connected to what matters.
             </p>
           </div>
         </div>
@@ -5527,6 +5744,22 @@
 
   <script>
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const slowUpdateQuery = window.matchMedia("(update: slow)");
+    const motionConnection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const motionMemory = Number(navigator.deviceMemory || 0);
+    const motionCores = Number(navigator.hardwareConcurrency || 0);
+    const motionMode = (
+      reducedMotionQuery.matches ||
+      slowUpdateQuery.matches ||
+      motionConnection?.saveData ||
+      !("IntersectionObserver" in window)
+    )
+      ? "off"
+      : ((motionMemory && motionMemory <= 4) || (motionCores && motionCores <= 4) ? "lite" : "full");
+    const allowsMotion = motionMode !== "off";
+    const allowsFullMotion = motionMode === "full";
+    document.documentElement.classList.add(`motion-${motionMode}`);
+
     const carousel = document.querySelector("[data-carousel]");
     if (carousel) {
       const screen = document.querySelector("[data-carousel-screen]");
@@ -5562,6 +5795,7 @@
       const next = document.querySelector("[data-carousel-next]");
       let activeIndex = 0;
       let carouselTimer;
+      let carouselInView = false;
 
       function showSlide(index) {
         activeIndex = (index + slides.length) % slides.length;
@@ -5573,16 +5807,31 @@
 
         copyBlocks.forEach((copy, copyIndex) => {
           copy.classList.toggle("is-active", copyIndex === activeIndex);
-          if (copyIndex === activeIndex && copy.animate && !reducedMotionQuery.matches) {
+          if (copyIndex === activeIndex && copy.animate && allowsMotion && !reducedMotionQuery.matches) {
             copy.animate(
-              [
-                { opacity: 0, transform: "translateY(10px)" },
-                { opacity: 1, transform: "translateY(0)" }
-              ],
-              { duration: 380, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
+              allowsFullMotion
+                ? [
+                    { opacity: 0, transform: "translate3d(0, 10px, 0)" },
+                    { opacity: 1, transform: "translate3d(0, 0, 0)" }
+                  ]
+                : [{ opacity: 0.72 }, { opacity: 1 }],
+              { duration: allowsFullMotion ? 380 : 180, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
             );
           }
         });
+
+        if (screen?.animate && allowsMotion && !reducedMotionQuery.matches) {
+          screen.getAnimations?.().forEach((animation) => animation.cancel());
+          screen.animate(
+            allowsFullMotion
+              ? [
+                  { opacity: 0.72, transform: "translateZ(0) scale(1.006)" },
+                  { opacity: 1, transform: "translateZ(0) scale(1)" }
+                ]
+              : [{ opacity: 0.78 }, { opacity: 1 }],
+            { duration: allowsFullMotion ? 460 : 180, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }
+          );
+        }
 
         dots.forEach((dot, dotIndex) => {
           dot.classList.toggle("is-active", dotIndex === activeIndex);
@@ -5591,7 +5840,7 @@
 
       function restartCarouselTimer() {
         window.clearInterval(carouselTimer);
-        if (reducedMotionQuery.matches || document.hidden || carousel.matches(":hover, :focus-within")) return;
+        if (!allowsFullMotion || reducedMotionQuery.matches || !carouselInView || document.hidden || carousel.matches(":hover, :focus-within")) return;
         carouselTimer = window.setInterval(() => showSlide(activeIndex + 1), 4800);
       }
 
@@ -5611,6 +5860,14 @@
       carousel.addEventListener("focusout", restartCarouselTimer);
       document.addEventListener("visibilitychange", restartCarouselTimer);
       reducedMotionQuery.addEventListener?.("change", restartCarouselTimer);
+
+      if (allowsFullMotion) {
+        const carouselActivityObserver = new IntersectionObserver((entries) => {
+          carouselInView = entries.some((entry) => entry.isIntersecting);
+          restartCarouselTimer();
+        }, { threshold: 0.16 });
+        carouselActivityObserver.observe(carousel);
+      }
 
       restartCarouselTimer();
     }
@@ -5700,17 +5957,23 @@
         const route = document.createElementNS(svgNamespace, "path");
         route.setAttribute("class", `ecosystem-route ecosystem-route-${routeType}${seed % 3 === 0 ? " is-soft" : ""}`);
         route.setAttribute("d", pathData);
+        route.setAttribute("pathLength", "1");
         route.setAttribute("stroke", color);
+        route.style.setProperty("--route-delay", `${90 + ((seed % 7) * 45)}ms`);
         ecosystemRoutes.append(route);
 
         const glow = document.createElementNS(svgNamespace, "path");
         const glowLength = 9 + (seed % 7);
-        glow.setAttribute("class", `ecosystem-route-glow ecosystem-route-${routeType}-glow`);
+        const glowStart = -((seed * 11) % 82);
+        glow.setAttribute("class", `ecosystem-route-glow ecosystem-route-${routeType}-glow${seed % 3 === 0 ? " is-flowing" : ""}`);
         glow.setAttribute("d", pathData);
         glow.setAttribute("pathLength", "100");
         glow.setAttribute("stroke", color);
         glow.style.strokeDasharray = `${glowLength} ${100 - glowLength}`;
-        glow.style.strokeDashoffset = `${-((seed * 11) % 82)}`;
+        glow.style.strokeDashoffset = `${glowStart}`;
+        glow.style.setProperty("--route-flow-duration", `${4.2 + ((seed % 6) * 0.12)}s`);
+        glow.style.setProperty("--route-flow-delay", `${-((seed % 8) * 0.48)}s`);
+        glow.style.setProperty("--route-glow-delay", `${520 + ((seed % 5) * 55)}ms`);
         ecosystemRoutes.append(glow);
       }
 
@@ -5796,7 +6059,9 @@
         ecosystemLayoutFrame = window.requestAnimationFrame(layoutEcosystemRoutes);
       }
 
-      new ResizeObserver(queueEcosystemLayout).observe(ecosystemMap);
+      if ("ResizeObserver" in window) {
+        new ResizeObserver(queueEcosystemLayout).observe(ecosystemMap);
+      }
       window.addEventListener("resize", queueEcosystemLayout, { passive: true });
       document.fonts?.ready.then(queueEcosystemLayout);
       queueEcosystemLayout();
@@ -5854,7 +6119,7 @@
       });
     }
 
-    if (!reducedMotionQuery.matches && "IntersectionObserver" in window) {
+    if (allowsMotion) {
       const revealTargets = Array.from(document.querySelectorAll([
         ".hero-content > *",
         "#system .section-head",
@@ -5874,6 +6139,8 @@
         "#compare .comparison-intro-grid",
         "#compare .comparison-table-card",
         "#compare .comparison-sources-details",
+        "#latest-articles .journal-heading",
+        "#latest-articles .journal-grid",
         "#faq .section-head",
         "#faq details"
       ].join(",")));
@@ -5901,6 +6168,58 @@
       }, { threshold: 0.08, rootMargin: "0px 0px -7% 0px" });
 
       revealTargets.forEach((target) => revealObserver.observe(target));
+
+      reducedMotionQuery.addEventListener?.("change", (event) => {
+        if (!event.matches) return;
+        revealTargets.forEach((target) => target.classList.add("is-visible"));
+        revealObserver.disconnect();
+      });
+    }
+
+    if (allowsFullMotion && ecosystemMap && "IntersectionObserver" in window) {
+      let ecosystemInView = false;
+      const syncEcosystemActivity = () => {
+        ecosystemMap.closest(".ecosystem-card")?.classList.toggle(
+          "is-motion-active",
+          ecosystemInView && !document.hidden && !reducedMotionQuery.matches
+        );
+      };
+      const ecosystemActivityObserver = new IntersectionObserver((entries) => {
+        ecosystemInView = entries.some((entry) => entry.isIntersecting);
+        syncEcosystemActivity();
+      }, { threshold: 0.12, rootMargin: "10% 0px 10% 0px" });
+      ecosystemActivityObserver.observe(ecosystemMap);
+      document.addEventListener("visibilitychange", syncEcosystemActivity);
+      reducedMotionQuery.addEventListener?.("change", syncEcosystemActivity);
+    }
+
+    const phoneStage = document.querySelector(".phone-stage");
+    const phoneShell = phoneStage?.querySelector(".phone-shell");
+    const finePointerQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+    if (allowsFullMotion && phoneStage && phoneShell && finePointerQuery.matches) {
+      let phoneTiltFrame;
+
+      const setPhoneTilt = (x, y) => {
+        phoneShell.style.setProperty("--phone-tilt-x", `${x.toFixed(2)}deg`);
+        phoneShell.style.setProperty("--phone-tilt-y", `${y.toFixed(2)}deg`);
+      };
+
+      phoneStage.addEventListener("pointermove", (event) => {
+        window.cancelAnimationFrame(phoneTiltFrame);
+        phoneTiltFrame = window.requestAnimationFrame(() => {
+          const rect = phoneStage.getBoundingClientRect();
+          const xRatio = (event.clientX - rect.left) / Math.max(1, rect.width);
+          const yRatio = (event.clientY - rect.top) / Math.max(1, rect.height);
+          phoneStage.classList.add("is-interacting");
+          setPhoneTilt((0.5 - yRatio) * 3.2, (xRatio - 0.5) * 3.2);
+        });
+      }, { passive: true });
+
+      phoneStage.addEventListener("pointerleave", () => {
+        window.cancelAnimationFrame(phoneTiltFrame);
+        phoneStage.classList.remove("is-interacting");
+        setPhoneTilt(0, 0);
+      }, { passive: true });
     }
   </script>
 <script>
@@ -5952,6 +6271,6 @@
     pricingObserver.observe(pricingSection);
   }
 </script>
-  <script src="/assets/site-navigation.js" defer></script>
+  <script src="/assets/site-navigation.js?v=20260816-1" defer></script>
 </body>
 </html>
