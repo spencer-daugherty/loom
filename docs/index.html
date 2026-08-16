@@ -4929,6 +4929,12 @@
       background: #e7f2ff;
     }
 
+    #screenshots .carousel-pause:disabled {
+      opacity: 0.56;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
     .research-card-label {
       display: inline-flex;
       width: fit-content;
@@ -5158,17 +5164,18 @@
       }
 
       #screenshots .phone-shell {
-        width: min(54vw, 196px);
+        width: min(80vw, 304px, 100%);
+        margin-inline: auto;
       }
 
       #screenshots .carousel-arrow {
-        width: 48px;
-        height: 48px;
+        width: 46px;
+        height: 46px;
         font-size: 1.45rem;
       }
 
       #screenshots .carousel-dot {
-        width: 24px;
+        width: 20px;
         height: 44px;
       }
 
@@ -5197,34 +5204,63 @@
         line-height: 1.35;
       }
 
+      #features .little-wins-step {
+        grid-template-columns: 50px minmax(0, 1fr);
+      }
+
+      #features .little-wins-stack {
+        width: 50px;
+        height: 34px;
+        margin-bottom: 0;
+        transform: none;
+        transform-origin: center;
+      }
+
+      #features .little-win-mini {
+        width: 20px;
+        height: 32px;
+        border-radius: 4px;
+        box-shadow: 0 6px 14px rgba(24, 25, 22, 0.12);
+      }
+
+      #features .little-win-mini:nth-child(1) { left: 0; }
+      #features .little-win-mini:nth-child(2) { left: 15px; }
+      #features .little-win-mini:nth-child(3) { left: 30px; }
+
+      #features .little-win-mini::after {
+        width: 10px;
+        height: 10px;
+        border-width: 1.2px;
+      }
+
       #integrations .grid.two {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 9px;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
       }
 
       #integrations .integration-card {
-        gap: 9px;
+        gap: 12px;
         min-width: 0;
-        padding: 13px;
+        padding: 18px;
         border-radius: 18px;
       }
 
       #integrations .integration-card h3 {
-        font-size: 1rem;
+        font-size: 1.08rem;
       }
 
       #integrations .integration-card p {
-        font-size: 0.75rem;
-        line-height: 1.4;
+        font-size: 0.9rem;
+        line-height: 1.5;
       }
 
       #integrations .integration-art.apple-intelligence {
-        flex-wrap: wrap;
-        gap: 8px;
+        flex-wrap: nowrap;
+        gap: 12px;
       }
 
       #integrations .integration-art.apple-intelligence img:last-child {
-        width: min(100%, 124px);
+        width: min(100%, 180px);
         height: auto;
       }
 
@@ -5460,6 +5496,127 @@
       .motion-full #features.is-motion-active .grid.is-visible .little-wins-stack,
       .motion-full #integrations.is-motion-active .grid.is-visible .integration-art {
         animation: mobile-icon-breathe 5.8s ease-in-out var(--graphic-delay, 0s) infinite;
+      }
+    }
+
+    /* Phone readability: keep supporting copy legible without changing desktop geometry. */
+    @media (max-width: 430px) {
+      #ambassador-banner .ambassador-banner-copy,
+      #ambassador-banner .ambassador-banner-action {
+        font-size: 0.875rem;
+        line-height: 1.3;
+      }
+
+      #ambassador-banner .ambassador-banner-link {
+        gap: 9px;
+        padding-inline: 42px;
+      }
+
+      .hero-category {
+        max-width: 31ch;
+        font-size: 0.875rem;
+        line-height: 1.45;
+      }
+
+      .section-head p,
+      #screenshots .screenshot-copy-card p,
+      #integrations .integration-card p {
+        font-size: 0.9375rem;
+        line-height: 1.5;
+      }
+
+      #system .ecosystem-layer p {
+        font-size: 0.8125rem;
+      }
+
+      #system .passion-circle {
+        font-size: 0.625rem;
+      }
+
+      #system .area-chip,
+      #system .area-custom {
+        font-size: 0.72rem;
+        line-height: 1.1;
+      }
+
+      #system .system-node h3 {
+        font-size: 0.74rem;
+      }
+
+      #features .step p {
+        font-size: 0.875rem;
+        line-height: 1.48;
+      }
+
+      #research .research-card-label {
+        font-size: 0.8125rem;
+        line-height: 1.35;
+      }
+
+      #research .founder-story,
+      #research .research-card p,
+      #research .research-evidence li > span {
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+
+      #research .research-evidence .research-citation {
+        margin-left: 0;
+        font-size: 0.8125rem;
+        line-height: 1.4;
+        white-space: normal;
+      }
+
+      #pricing .plan-popular-tag {
+        font-size: 0.8125rem;
+        line-height: 1;
+      }
+
+      #pricing .annual-price-context,
+      #pricing .plan-card p,
+      #pricing .plan-disclaimer,
+      #pricing .pricing-action .fine-print {
+        font-size: 0.875rem;
+        line-height: 1.48;
+      }
+
+      #pricing .price .price-unit {
+        font-size: 0.9rem;
+        line-height: 1.2;
+      }
+
+      #compare .comparison-point p,
+      #compare .comparison-note,
+      #compare .comparison-controls-eyebrow,
+      #compare .comparison-select-label > span:first-child,
+      #compare .comparison-table.comparison-enhanced th,
+      #compare .comparison-table.comparison-enhanced td,
+      #compare .comparison-table.comparison-enhanced .comparison-topic,
+      #compare .comparison-table.comparison-enhanced span:not(.comparison-topic),
+      #compare .comparison-sources {
+        font-size: 0.875rem;
+      }
+
+      #compare .comparison-point p,
+      #compare .comparison-note,
+      #compare .comparison-table.comparison-enhanced span:not(.comparison-topic),
+      #compare .comparison-sources {
+        line-height: 1.48;
+      }
+
+      #compare .comparison-table.comparison-enhanced .comparison-topic {
+        line-height: 1.3;
+      }
+
+      .journal-kicker,
+      .journal-meta,
+      .journal-tag,
+      .legal-note {
+        font-size: 0.875rem;
+      }
+
+      .journal-meta {
+        line-height: 1.45;
       }
     }
 
@@ -5797,7 +5954,7 @@
             <h3>Action Plans</h3>
             <p>Move from goals and captured tasks into focused execution with due dates, people, places, attachments, duration, musts, and status.</p>
           </article>
-          <article class="card step">
+          <article class="card step little-wins-step">
             <div class="little-wins-stack" aria-hidden="true">
               <span class="little-win-mini"></span>
               <span class="little-win-mini"></span>
@@ -6459,12 +6616,11 @@
       const autoplayToggle = document.querySelector("[data-carousel-toggle]");
       const autoplayIcon = document.querySelector("[data-carousel-toggle-icon]");
       const phoneStage = carousel.querySelector(".phone-stage");
-      const coarsePointerQuery = window.matchMedia("(hover: none), (pointer: coarse)");
-      const mobileCarouselQuery = window.matchMedia("(max-width: 640px)");
+      const hoverCapableQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
       let activeIndex = 0;
       let carouselTimer;
       let carouselInView = false;
-      let carouselPaused = reducedMotionQuery.matches || coarsePointerQuery.matches || mobileCarouselQuery.matches;
+      let carouselPaused = !allowsFullMotion;
       let swipeStartX = 0;
       let swipeStartY = 0;
 
@@ -6527,22 +6683,34 @@
         preloadSlide(activeIndex + 1);
       }
 
+      function autoplayIsAvailable() {
+        return allowsFullMotion && !reducedMotionQuery.matches;
+      }
+
       function syncAutoplayToggle() {
         if (!autoplayToggle) return;
+        const autoplayAvailable = autoplayIsAvailable();
+        autoplayToggle.disabled = !autoplayAvailable;
+        if (!autoplayAvailable) {
+          autoplayToggle.setAttribute("aria-pressed", "true");
+          autoplayToggle.setAttribute("aria-label", "Screenshot autoplay is off for motion or device performance settings");
+          if (autoplayIcon) autoplayIcon.textContent = "▶";
+          return;
+        }
         autoplayToggle.setAttribute("aria-pressed", String(carouselPaused));
         autoplayToggle.setAttribute("aria-label", carouselPaused ? "Play screenshot autoplay" : "Pause screenshot autoplay");
         if (autoplayIcon) autoplayIcon.textContent = carouselPaused ? "▶" : "❙❙";
       }
 
       function setCarouselPaused(paused, forceInteraction) {
-        carouselPaused = paused;
+        carouselPaused = !autoplayIsAvailable() || paused;
         syncAutoplayToggle();
         restartCarouselTimer(forceInteraction);
       }
 
       function restartCarouselTimer(forceInteraction) {
         window.clearInterval(carouselTimer);
-        if (carouselPaused || !allowsFullMotion || reducedMotionQuery.matches || !carouselInView || document.hidden || (!forceInteraction && carousel.matches(":hover"))) return;
+        if (carouselPaused || !allowsFullMotion || reducedMotionQuery.matches || !carouselInView || document.hidden || (!forceInteraction && hoverCapableQuery.matches && carousel.matches(":hover"))) return;
         carouselTimer = window.setInterval(() => showSlide(activeIndex + 1), 5600);
       }
 
@@ -6596,15 +6764,12 @@
       carousel.addEventListener("focusout", () => window.requestAnimationFrame(restartCarouselTimer));
       document.addEventListener("visibilitychange", restartCarouselTimer);
       reducedMotionQuery.addEventListener?.("change", (event) => {
-        if (event.matches) setCarouselPaused(true);
+        if (event.matches) {
+          setCarouselPaused(true);
+        } else {
+          syncAutoplayToggle();
+        }
       });
-      coarsePointerQuery.addEventListener?.("change", (event) => {
-        if (event.matches) setCarouselPaused(true);
-      });
-      mobileCarouselQuery.addEventListener?.("change", (event) => {
-        if (event.matches) setCarouselPaused(true);
-      });
-
       if (allowsFullMotion) {
         const carouselActivityObserver = new IntersectionObserver((entries) => {
           carouselInView = entries.some((entry) => entry.isIntersecting);
