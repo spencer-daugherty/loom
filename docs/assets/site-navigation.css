@@ -8,6 +8,38 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
 }
 
+html {
+  scroll-padding-top: 84px;
+}
+
+main :where([id]),
+footer :where([id]),
+body > :where([id]):not(.site-header):not(.ambassador-banner) {
+  scroll-margin-top: 84px;
+}
+
+.footer .footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 16px;
+}
+
+.footer .footer-links a {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.footer .footer-links a:hover,
+.footer .footer-links a:focus-visible,
+.footer .footer-links a[aria-current="page"] {
+  color: #111;
+  text-decoration: underline;
+}
+
 .site-header-shell {
   display: flex;
   align-items: center;
@@ -173,6 +205,17 @@
 .ambassador-banner-dismissed .ambassador-banner { display: none; }
 
 @media (max-width: 980px) {
+  html { scroll-padding-top: 78px; }
+
+  .footer .footer-links {
+    justify-content: flex-start;
+  }
+
+  main :where([id]),
+  body > :where([id]):not(.site-header):not(.ambassador-banner) {
+    scroll-margin-top: 78px;
+  }
+
   .site-header-shell { min-height: 64px; }
   .site-primary-links,
   .site-header-cta { display: none; }
@@ -325,19 +368,15 @@
   .site-mobile-panel { transition: none; }
 }
 
-/* Progressive motion: JavaScript opts capable devices in after content is ready. */
+/* Progressive motion: content stays visible if scripting or observation is delayed. */
 @media (prefers-reduced-motion: no-preference) {
   html.site-motion-ready.site-motion-full .site-motion-item {
-    opacity: 0;
-    transform: translate3d(0, 18px, 0);
-    transition:
-      opacity 620ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--site-motion-delay, 0ms),
-      transform 620ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--site-motion-delay, 0ms);
+    opacity: 1;
+    transform: none;
   }
 
   html.site-motion-ready.site-motion-lite .site-motion-item {
-    opacity: 0;
-    transition: opacity 220ms ease-out var(--site-motion-delay, 0ms);
+    opacity: 1;
   }
 
   html.site-motion-ready .site-motion-item.is-visible {
@@ -346,11 +385,8 @@
   }
 
   html.site-motion-ready.site-motion-full .site-motion-child {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.992);
-    transition:
-      opacity 480ms ease-out var(--site-motion-child-delay, 90ms),
-      transform 560ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--site-motion-child-delay, 90ms);
+    opacity: 1;
+    transform: none;
   }
 
   html.site-motion-ready.site-motion-full .site-motion-item.is-visible .site-motion-child {

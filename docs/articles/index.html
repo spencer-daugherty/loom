@@ -39,7 +39,7 @@
       "url": "https://loomlife.us/articles/",
       "name": "Loom Articles: Beyond the To-Do List",
       "description": "Practical Loom articles for moving beyond disconnected to-do lists and connecting goals, tasks, Little Wins, life areas, and reflection.",
-      "dateModified": "2026-08-12",
+      "dateModified": "2026-08-16",
       "isPartOf": {
         "@type": "WebSite",
         "@id": "https://loomlife.us/#website",
@@ -212,7 +212,7 @@
   <header class="site-header" data-site-header>
     <div class="site-header-shell">
       <a class="site-brand" href="/" aria-label="Loom Life Manager home">
-        <img src="/assets/landing/loom-icon.jpeg" alt="Loom app icon" width="34" height="34" decoding="async">
+        <img src="/assets/landing/loom-icon-128.jpg" alt="Loom app icon" width="34" height="34" decoding="async">
         <span class="site-brand-name"><span class="site-brand-name-full">Loom: Life Manager</span><span class="site-brand-name-short">Loom</span></span>
       </a>
       <div class="site-nav-actions">
@@ -223,7 +223,7 @@
           <a href="/articles/" data-nav-link="articles">Articles</a>
           <a href="/support.html" data-nav-link="support">Support</a>
         </nav>
-        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=seo-article-hub-h&amp;mt=8" data-app-store-cta data-page-type="hub" data-content-slug="articles" data-content-cluster="editorial-hub" data-target-keyword="life management articles" data-search-intent="informational" data-cta-position="header">Get Loom</a>
+        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-articles-header-a704ca&amp;mt=8" data-app-store-cta data-page-type="hub" data-content-slug="articles" data-content-cluster="editorial-hub" data-target-keyword="life management articles" data-search-intent="informational" data-cta-position="header">Get Loom</a>
         <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-mobile-menu" aria-label="Open navigation menu" data-site-menu-toggle>
           <span class="site-menu-icon" aria-hidden="true"></span>
           <span data-site-menu-label>Menu</span>
@@ -240,18 +240,17 @@
         <a href="/articles/" data-nav-link="articles">Articles</a>
         <a href="/support.html" data-nav-link="support">Support</a>
       </div>
-      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=seo-article-hub-h&amp;mt=8" data-app-store-cta data-page-type="hub" data-content-slug="articles" data-content-cluster="editorial-hub" data-target-keyword="life management articles" data-search-intent="informational" data-cta-position="mobile-menu">Download on the App Store</a>
+      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-articles-mobile-m-2e77d3&amp;mt=8" data-app-store-cta data-page-type="hub" data-content-slug="articles" data-content-cluster="editorial-hub" data-target-keyword="life management articles" data-search-intent="informational" data-cta-position="mobile-menu">Download on the App Store</a>
     </nav>
   </header>
   <main>
+    <nav class="breadcrumbs shell" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li><li aria-current="page">Articles</li></ol></nav>
     <header class="hub-hero">
       <div class="shell">
         <span class="eyebrow">Loom original articles</span>
         <h1>Move beyond the to-do list.</h1>
         <p>Practical, product-grounded guidance for people managing several responsibilities and life areas. Start with the problem you are trying to solve, then see how Loom connects Purpose, Goals, Action Plans, Little Wins, Capture, and Reflection.</p>
-        <nav class="cluster-nav" aria-label="Article topics">
-          <a href="#connected-workflows">Connected workflows</a><a href="#overwhelmed-professionals">Busy professionals</a><a href="#productivity-restarters">Productivity restarts</a><a href="#life-transition">Life transitions</a><a href="#adhd-productivity">ADHD productivity</a><a href="#task-overload">Task overload</a><a href="#goals-action">Goals and action</a><a href="#little-wins">Little Wins</a><a href="#whole-life-planning">Whole-life planning</a>
-        </nav>
+        <a class="hub-jump" href="#article-library">Browse the article library <span aria-hidden="true">↓</span></a>
       </div>
     </header>
 
@@ -265,6 +264,45 @@
         <div class="editorial-note">
           <h3>What you will find</h3>
           <p>Direct answers, realistic examples, current Loom product proof, honest limitations, an author byline, and a clear separation between Loom's product and the broader sources that inspired its founder.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="article-discovery" id="article-library" aria-labelledby="article-library-heading" hidden>
+      <div class="shell">
+        <div class="featured-heading">
+          <div>
+            <span class="eyebrow">Latest from Loom</span>
+            <h2 id="article-library-heading">Start with what you need now.</h2>
+          </div>
+          <p>Focused guidance for connecting direction, plans, and daily action—without building another complicated dashboard.</p>
+        </div>
+        <div class="featured-grid" data-featured-articles role="region" aria-label="Latest articles"></div>
+
+        <div class="feed-toolbar" role="search" aria-label="Search and filter Loom articles">
+          <label class="feed-search" for="article-search">
+            <span class="visually-hidden">Search articles</span>
+            <span class="feed-search-icon" aria-hidden="true"></span>
+            <input id="article-search" type="search" inputmode="search" autocomplete="off" placeholder="Search goals, planning, ADHD…" aria-controls="article-feed" data-article-search>
+          </label>
+          <div class="feed-filters" role="group" aria-label="Filter by article type" data-article-filters>
+            <button type="button" class="feed-filter is-active" data-feed-filter="all" aria-pressed="true">All</button>
+            <button type="button" class="feed-filter" data-feed-filter="tips" aria-pressed="false">Tips</button>
+            <button type="button" class="feed-filter" data-feed-filter="how-to" aria-pressed="false">How-to</button>
+            <button type="button" class="feed-filter" data-feed-filter="comparisons" aria-pressed="false">Comparisons</button>
+            <button type="button" class="feed-filter" data-feed-filter="frameworks" aria-pressed="false">Frameworks</button>
+          </div>
+          <p class="feed-count" aria-live="polite" aria-atomic="true" data-feed-count></p>
+        </div>
+
+        <div class="card-grid article-feed" id="article-feed" data-article-feed></div>
+        <div class="feed-empty" data-feed-empty hidden>
+          <h3>No articles match that search.</h3>
+          <p>Try a broader phrase or return to the complete library.</p>
+          <button type="button" class="button secondary" data-clear-feed>Clear search and filters</button>
+        </div>
+        <div class="feed-more-row">
+          <button type="button" class="button secondary feed-more" data-feed-more aria-controls="article-feed" hidden>Show more articles</button>
         </div>
       </div>
     </section>
@@ -550,14 +588,163 @@
         <p>&copy; 2026 Spencer Daugherty. All rights reserved.</p>
       </div>
       <nav class="footer-links" aria-label="Footer navigation">
-        <a href="/articles/">Articles</a>
-        <a href="/articles/about-spencer-daugherty/">About the author</a>
-        <a href="/articles/editorial-policy/">Editorial policy</a>
+        <a href="/">Home</a>
+        <a href="/ambassadors/">Ambassadors</a>
+        <a href="/articles/" aria-current="page">Articles</a>
+        <a href="/investor/">Investor</a>
         <a href="/privacy.html">Privacy</a>
         <a href="/support.html">Support</a>
+        <a href="/articles/about-spencer-daugherty/">About the author</a>
+        <a href="/articles/editorial-policy/">Editorial policy</a>
+        <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Terms (Apple EULA)</a>
+        <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-articles-footer-f0f751&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="hub" data-content-slug="articles" data-content-cluster="editorial-hub" data-target-keyword="life management articles" data-search-intent="informational">App Store</a>
       </nav>
     </div>
   </footer>
   <script src="/assets/site-navigation.js?v=20260816-2" defer></script>
+  <script>
+    (() => {
+      const sourceSections = [...document.querySelectorAll('.cluster-section')];
+      const feed = document.querySelector('[data-article-feed]');
+      const discovery = document.querySelector('.article-discovery');
+      const search = document.querySelector('[data-article-search]');
+      const count = document.querySelector('[data-feed-count]');
+      const more = document.querySelector('[data-feed-more]');
+      const empty = document.querySelector('[data-feed-empty]');
+      const clear = document.querySelector('[data-clear-feed]');
+      const featured = document.querySelector('[data-featured-articles]');
+      const filterButtons = [...document.querySelectorAll('[data-feed-filter]')];
+
+      if (!sourceSections.length || !feed || !discovery || !search || !count || !more || !empty || !featured) return;
+
+      const categoryFor = (label) => {
+        const type = label.toLowerCase();
+        if (type.includes('comparison') || type.includes('selection')) return 'comparisons';
+        if (type.includes('how-to') || type.includes('workflow') || type.includes('guide')) return 'how-to';
+        if (type.includes('framework') || type.includes('system') || type.includes('plan')) return 'frameworks';
+        return 'tips';
+      };
+
+      const seen = new Set();
+      const cards = sourceSections.flatMap((section) => [...section.querySelectorAll('.article-card')]).filter((card) => {
+        const href = card.querySelector('h3 a')?.getAttribute('href');
+        if (!href || seen.has(href)) return false;
+        seen.add(href);
+        const type = card.querySelector('.content-type-tag')?.textContent.trim() || 'Guide';
+        card.dataset.feedCategory = categoryFor(type);
+        card.dataset.feedSearch = card.textContent.toLowerCase().replace(/\s+/g, ' ').trim();
+        card.dataset.feedDate = card.querySelector('time')?.getAttribute('datetime') || '1970-01-01';
+        return true;
+      }).sort((a, b) => b.dataset.feedDate.localeCompare(a.dataset.feedDate));
+
+      if (!cards.length) return;
+
+      cards.forEach((card) => feed.append(card));
+      cards.slice(0, 3).forEach((card, index) => {
+        const clone = card.cloneNode(true);
+        clone.classList.add('featured-article-card');
+        clone.querySelectorAll('[data-link-position]').forEach((link) => {
+          link.dataset.linkPosition = index === 0 ? 'hub-featured-primary' : 'hub-featured-latest';
+        });
+        featured.append(clone);
+      });
+
+      discovery.hidden = false;
+      sourceSections.forEach((section) => { section.hidden = true; });
+
+      const allowedFilters = new Set(['all', 'tips', 'how-to', 'comparisons', 'frameworks']);
+      const initialParams = new URLSearchParams(window.location.search);
+      let activeFilter = allowedFilters.has(initialParams.get('type')) ? initialParams.get('type') : 'all';
+      let visibleLimit = window.matchMedia('(max-width: 620px)').matches ? 6 : 9;
+
+      search.value = initialParams.get('q') || '';
+      filterButtons.forEach((button) => {
+        const active = button.dataset.feedFilter === activeFilter;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+
+      const normalize = (value) => value.toLowerCase().trim().replace(/\s+/g, ' ');
+      const syncUrl = () => {
+        const url = new URL(window.location.href);
+        const query = search.value.trim();
+        if (query) url.searchParams.set('q', query);
+        else url.searchParams.delete('q');
+        if (activeFilter !== 'all') url.searchParams.set('type', activeFilter);
+        else url.searchParams.delete('type');
+        window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      };
+
+      const update = () => {
+        const query = normalize(search.value);
+        const matches = cards.filter((card) => {
+          const matchesCategory = activeFilter === 'all' || card.dataset.feedCategory === activeFilter;
+          const matchesSearch = !query || card.dataset.feedSearch.includes(query);
+          return matchesCategory && matchesSearch;
+        });
+        const shown = Math.min(visibleLimit, matches.length);
+
+        cards.forEach((card) => { card.hidden = true; });
+        matches.slice(0, visibleLimit).forEach((card) => { card.hidden = false; });
+        count.textContent = matches.length ? `Showing ${shown} of ${matches.length} articles` : 'No matching articles';
+        empty.hidden = matches.length !== 0;
+        more.hidden = shown >= matches.length;
+        featured.hidden = Boolean(query) || activeFilter !== 'all';
+      };
+
+      filterButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          activeFilter = button.dataset.feedFilter;
+          visibleLimit = window.matchMedia('(max-width: 620px)').matches ? 6 : 9;
+          filterButtons.forEach((item) => {
+            const active = item === button;
+            item.classList.toggle('is-active', active);
+            item.setAttribute('aria-pressed', String(active));
+          });
+          syncUrl();
+          update();
+        });
+      });
+
+      search.addEventListener('input', () => {
+        visibleLimit = window.matchMedia('(max-width: 620px)').matches ? 6 : 9;
+        syncUrl();
+        update();
+      });
+
+      search.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && search.value) {
+          search.value = '';
+          syncUrl();
+          update();
+        }
+      });
+
+      more.addEventListener('click', () => {
+        visibleLimit += window.matchMedia('(max-width: 620px)').matches ? 6 : 9;
+        update();
+      });
+
+      clear.addEventListener('click', () => {
+        search.value = '';
+        activeFilter = 'all';
+        visibleLimit = window.matchMedia('(max-width: 620px)').matches ? 6 : 9;
+        filterButtons.forEach((button) => {
+          const active = button.dataset.feedFilter === 'all';
+          button.classList.toggle('is-active', active);
+          button.setAttribute('aria-pressed', String(active));
+        });
+        syncUrl();
+        update();
+        search.focus();
+      });
+
+      update();
+
+      if (window.location.hash === '#article-library') {
+        window.setTimeout(() => discovery.scrollIntoView({ block: 'start' }), 0);
+      }
+    })();
+  </script>
 </body>
 </html>

@@ -26,7 +26,7 @@
   <link rel="apple-touch-icon" href="assets/landing/loom-icon.jpeg">
   <style>
     :root {
-      --bg: #f5f3ef;
+      --bg: #f5f7fb;
       --surface: rgba(255, 255, 255, 0.78);
       --surface-strong: rgba(255, 255, 255, 0.94);
       --ink: #111111;
@@ -36,9 +36,6 @@
       --blue: #2f6bff;
       --indigo: #5a5cff;
       --green: #2ea76d;
-      --purple: #8754ff;
-      --red: #df4a66;
-      --orange: #ff8a3d;
       --radius-xl: 32px;
       --radius-lg: 24px;
       --max: 1120px;
@@ -57,10 +54,8 @@
       min-height: 100vh;
       color: var(--ink);
       background:
-        radial-gradient(circle at 10% 10%, rgba(47, 107, 255, 0.16), transparent 26%),
-        radial-gradient(circle at 88% 12%, rgba(223, 74, 102, 0.12), transparent 24%),
-        radial-gradient(circle at 78% 78%, rgba(255, 138, 61, 0.14), transparent 28%),
-        linear-gradient(180deg, #fbfaf7 0%, var(--bg) 100%);
+        radial-gradient(circle at 18% 0%, rgba(47, 107, 255, 0.1), transparent 28%),
+        linear-gradient(180deg, #ffffff 0%, var(--bg) 100%);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
@@ -197,8 +192,8 @@
 
     .button.primary {
       color: #fff;
-      background: linear-gradient(135deg, var(--blue), var(--purple), var(--red));
-      box-shadow: 0 14px 34px rgba(90, 92, 255, 0.26);
+      background: linear-gradient(135deg, #1958e8, var(--blue));
+      box-shadow: 0 14px 34px rgba(47, 107, 255, 0.22);
     }
 
     .button.secondary {
@@ -299,8 +294,9 @@
       justify-content: space-between;
       gap: 12px;
       align-items: center;
-      margin-top: 20px;
-      padding: 0 4px;
+      width: min(calc(100% - 28px), var(--max));
+      margin: 20px auto 0;
+      padding: 0 4px 44px;
       color: var(--muted);
       font-size: 0.92rem;
     }
@@ -429,7 +425,7 @@
   <header class="site-header" data-site-header>
     <div class="site-header-shell">
       <a class="site-brand" href="/" aria-label="Loom Life Manager home">
-        <img src="/assets/landing/loom-icon.jpeg" alt="Loom app icon" width="34" height="34" decoding="async">
+        <img src="/assets/landing/loom-icon-128.jpg" alt="Loom app icon" width="34" height="34" decoding="async">
         <span class="site-brand-name"><span class="site-brand-name-full">Loom: Life Manager</span><span class="site-brand-name-short">Loom</span></span>
       </a>
       <div class="site-nav-actions">
@@ -440,7 +436,7 @@
           <a href="/articles/" data-nav-link="articles">Articles</a>
           <a href="/support.html" data-nav-link="support">Support</a>
         </nav>
-        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-header&amp;mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="header">Get Loom</a>
+        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-header-3ced99&amp;mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="header" data-content-slug="privacy" data-content-cluster="life-management" data-search-intent="direct-app-recommendation">Get Loom</a>
         <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-mobile-menu" aria-label="Open navigation menu" data-site-menu-toggle>
           <span class="site-menu-icon" aria-hidden="true"></span>
           <span data-site-menu-label>Menu</span>
@@ -457,10 +453,10 @@
         <a href="/articles/" data-nav-link="articles">Articles</a>
         <a href="/support.html" data-nav-link="support">Support</a>
       </div>
-      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-mobile&amp;mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="mobile-menu">Download on the App Store</a>
+      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-mobile-m-e60327&amp;mt=8" data-app-store-cta data-page-type="site" data-target-keyword="Loom Life Manager" data-competitor="" data-cta-position="mobile-menu" data-content-slug="privacy" data-content-cluster="life-management" data-search-intent="direct-app-recommendation">Download on the App Store</a>
     </nav>
   </header>
-  <div class="shell">
+  <main class="shell">
 
     <section class="hero">
       <div class="hero-grid">
@@ -471,7 +467,6 @@
             Effective Date: July 21, 2026. This page explains what Loom collects, how it is used, where it is stored, what optional permissions do, and how to manage your privacy choices.
           </p>
           <div class="hero-actions">
-            <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-hero&amp;mt=8" data-app-store-cta data-page-type="privacy" data-target-keyword="Loom privacy" data-competitor="" data-cta-position="hero">Download Loom on the App Store</a>
             <a class="button primary" href="support.html#privacy-choices">Privacy Choices</a>
             <a class="button secondary" href="support.html">Support</a>
           </div>
@@ -521,7 +516,7 @@
       </div>
     </section>
 
-    <section class="section"><div class="section-head"><div><h2>Get Loom on iPhone</h2><p class="section-copy">Loom is built for people who want purpose, goals, tasks, habits, reflection, and LoomAI in one life-management app.</p><div class="hero-actions"><a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-mid&amp;mt=8" data-app-store-cta data-page-type="privacy" data-target-keyword="Loom privacy" data-competitor="" data-cta-position="mid-privacy">Download Loom on the App Store</a><a class="button secondary" href="support.html">Support</a></div></div></div></section><section class="section" id="collects">
+    <section class="section" id="collects">
       <div class="section-head">
         <div>
           <h2>1. What Loom Collects</h2>
@@ -765,7 +760,7 @@
           <li>You can use Loom's in-app <code>Account &gt; Delete Account</code> flow to delete your account and remove your local app data</li>
           <li>For supported sign-in methods, Loom's deletion flow reauthenticates the account and, for Sign in with Apple, revokes Apple authorization before deleting the Firebase account</li>
           <li>Deleting your Loom account does not automatically cancel Apple subscriptions. Apple subscriptions must be canceled separately in Apple Account Settings</li>
-          <li>For privacy choices, support, or deletion follow-up, you can also visit <a href="support.html#privacy-choices">support.html#privacy-choices</a></li>
+          <li>For privacy choices, support, or deletion follow-up, visit the <a href="support.html#privacy-choices">privacy choices section of Loom Support</a></li>
           <li>If you need privacy help or a deletion-related follow-up, contact <a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a></li>
           <li>Ambassador applicants may use that same email address to request access to, correction of, or deletion of their submitted application information</li>
         </ul>
@@ -828,7 +823,11 @@
           <p class="policy-copy">Spencer R. Daugherty</p>
           <p class="policy-copy"><a href="mailto:spencer@loomlife.us">spencer@loomlife.us</a></p>
         </article>
-        <article class="policy-card"><h3>Download Loom</h3><p class="policy-copy"><a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-bottom&amp;mt=8" data-app-store-cta data-page-type="privacy" data-target-keyword="Loom privacy" data-competitor="" data-cta-position="bottom-privacy">Download Loom on the App Store</a></p></article>
+        <article class="policy-card">
+          <h3>Privacy choices</h3>
+          <p class="policy-copy">Review account deletion, subscription cancellation, and permission guidance on Loom Support.</p>
+          <p class="policy-copy"><a class="button primary" href="support.html#privacy-choices">Review privacy choices</a></p>
+        </article>
         <article class="policy-card">
           <h3>Support page</h3>
           <p class="policy-copy"><a href="support.html">support.html</a></p>
@@ -837,11 +836,21 @@
       </div>
     </section>
 
+  </main>
+
     <footer class="footer">
       <div>Loom Privacy Policy · Last updated July 21, 2026</div>
-      <div><a href="index.html">Home</a> · <a href="articles/">Articles</a> · <a href="investor/">Investor</a> · <a href="privacy.html" aria-current="page">Privacy</a> · <a href="support.html">Support</a> · <a href="support.html#privacy-choices">Privacy Choices</a></div>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <a href="/">Home</a>
+        <a href="/ambassadors/">Ambassadors</a>
+        <a href="/articles/">Articles</a>
+        <a href="/investor/">Investor</a>
+        <a href="/privacy.html" aria-current="page">Privacy</a>
+        <a href="/support.html">Support</a>
+        <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Terms (Apple EULA)</a>
+        <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-footer-f02896&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="site" data-content-slug="privacy" data-content-cluster="life-management" data-target-keyword="Loom Life Manager" data-search-intent="direct-app-recommendation">App Store</a>
+      </nav>
     </footer>
-  </div>
 <script>
   document.addEventListener('click', function(event) {
     var link = event.target.closest('[data-app-store-cta]');

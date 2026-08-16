@@ -37,7 +37,7 @@
         "url": "https://loomlife.us/investor/",
         "name": "Investor | Loom Life Manager",
         "description": "An investor overview of Loom Life Manager, its live iPhone and iPad product, business model, measured growth channels, and customer value.",
-        "dateModified": "2026-07-28",
+        "dateModified": "2026-08-16",
         "isPartOf": {"@type": "WebSite", "@id": "https://loomlife.us/#website", "url": "https://loomlife.us/"},
         "breadcrumb": {"@id": "https://loomlife.us/investor/#breadcrumb"}
       },
@@ -54,32 +54,51 @@
   </script>
   <link rel="stylesheet" href="/assets/site-navigation.css?v=20260816-2">
   <style>
-    :root { --paper:#fbfaf7; --surface:#fff; --ink:#111; --muted:#5d6470; --line:rgba(17,17,17,.11); --blue:#007aff; --navy:#102142; --violet:#5144c9; --max:1120px; }
+    :root { --paper:#f6f8fc; --surface:#fff; --ink:#111; --muted:#5d6470; --line:rgba(17,17,17,.1); --blue:#007aff; --blue-dark:#1558d6; --max:1120px; }
     * { box-sizing: border-box; }
     body { margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",Arial,sans-serif; line-height:1.58; -webkit-font-smoothing:antialiased; }
     a { color:inherit; }
     .shell { width:min(calc(100% - 28px),var(--max)); margin:0 auto; }
-    .investor-hero { padding:112px 0 88px; color:#fff; background:radial-gradient(circle at 78% 12%,rgba(123,112,255,.54),transparent 34%),linear-gradient(135deg,var(--navy),#183f78 58%,var(--violet)); }
-    .eyebrow { display:inline-flex; align-items:center; gap:10px; margin-bottom:20px; color:rgba(255,255,255,.72); font-size:.78rem; font-weight:850; letter-spacing:.11em; text-transform:uppercase; }
-    .eyebrow::before { content:""; width:28px; height:2px; background:#7fc4ff; }
+    .investor-hero { overflow:hidden; padding:92px 0 76px; background:radial-gradient(circle at 82% 20%,rgba(0,122,255,.14),transparent 34%),linear-gradient(180deg,#fff 0%,#edf4ff 100%); }
+    .investor-hero-grid { display:grid; grid-template-columns:minmax(0,1.06fr) minmax(310px,.74fr); gap:68px; align-items:center; }
+    .eyebrow { display:inline-flex; align-items:center; gap:10px; margin-bottom:20px; color:var(--blue-dark); font-size:.78rem; font-weight:850; letter-spacing:.11em; text-transform:uppercase; }
+    .eyebrow::before { content:""; width:28px; height:2px; background:var(--blue); }
     h1,h2,h3,p { margin-top:0; }
-    h1 { max-width:11ch; margin-bottom:22px; font-size:clamp(3.3rem,8vw,6.7rem); line-height:.96; letter-spacing:-.055em; }
+    h1 { max-width:11ch; margin-bottom:22px; font-size:clamp(3.3rem,7vw,6rem); line-height:.96; letter-spacing:-.055em; }
     h2 { margin-bottom:14px; font-size:clamp(2rem,5vw,3.6rem); line-height:1.02; letter-spacing:-.035em; }
     h3 { margin-bottom:10px; font-size:1.22rem; line-height:1.18; }
-    .hero-lead { max-width:63ch; margin:0; color:rgba(255,255,255,.79); font-size:1.23rem; }
+    .hero-lead { max-width:58ch; margin:0; color:var(--muted); font-size:1.18rem; }
+    .hero-meta { margin:22px 0 0; color:#6e7480; font-size:.86rem; font-weight:700; }
+    .product-proof { position:relative; display:grid; place-items:center; min-height:510px; }
+    .product-proof::before { content:""; position:absolute; width:330px; height:330px; border-radius:50%; background:rgba(0,122,255,.12); filter:blur(2px); }
+    .phone-frame { position:relative; width:min(274px,74vw); padding:9px; border:1px solid rgba(255,255,255,.7); border-radius:50px; background:#101114; box-shadow:0 35px 80px rgba(15,49,93,.25); transform:rotate(2deg); }
+    .phone-frame::before { content:""; position:absolute; z-index:2; top:15px; left:50%; width:32%; height:22px; border-radius:999px; background:#090a0c; transform:translateX(-50%); }
+    .phone-frame img { display:block; width:100%; height:auto; border-radius:41px; }
+    .proof-label { position:absolute; right:0; bottom:62px; z-index:3; padding:12px 15px; border:1px solid rgba(17,17,17,.08); border-radius:16px; background:rgba(255,255,255,.9); box-shadow:0 18px 45px rgba(17,17,17,.12); backdrop-filter:blur(14px); }
+    .proof-label strong,.proof-label span { display:block; }
+    .proof-label span { color:var(--muted); font-size:.78rem; }
     section { padding:88px 0; border-bottom:1px solid var(--line); }
     .section-intro { max-width:760px; margin-bottom:36px; }
     .section-intro p,.card p,.thesis-copy p { color:var(--muted); }
     .grid { display:grid; gap:18px; }
     .grid.three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .grid.four { grid-template-columns:repeat(4,minmax(0,1fr)); }
     .card { min-height:250px; padding:28px; border:1px solid var(--line); border-radius:24px; background:var(--surface); box-shadow:0 18px 50px rgba(17,17,17,.055); }
     .card-number { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; margin-bottom:34px; border-radius:50%; color:#0d4f91; background:#e8f3ff; font-size:.8rem; font-weight:850; }
-    .business-band { background:#f2f0ea; }
+    .proof-stat { min-height:170px; padding:24px; }
+    .proof-stat strong { display:block; margin-bottom:10px; font-size:clamp(1.45rem,3vw,2rem); line-height:1.05; letter-spacing:-.035em; }
+    .proof-stat span { color:var(--muted); font-size:.92rem; }
+    .business-band { background:#edf3fb; }
     .thesis-grid { display:grid; grid-template-columns:.85fr 1.15fr; gap:50px; align-items:start; }
     .thesis-list { display:grid; gap:14px; }
     .thesis-item { padding:22px 24px; border-left:3px solid var(--blue); background:#fff; box-shadow:0 12px 34px rgba(17,17,17,.045); }
     .thesis-item strong { display:block; margin-bottom:4px; }
     .thesis-item span { color:var(--muted); }
+    .diligence-grid { display:grid; grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr); gap:48px; align-items:start; }
+    .evidence-list { display:grid; gap:12px; margin:0; padding:0; list-style:none; }
+    .evidence-list li { padding:18px 20px; border:1px solid var(--line); border-radius:18px; background:#fff; }
+    .evidence-list strong { display:block; margin-bottom:3px; }
+    .evidence-list span { color:var(--muted); }
     .contact-band { border:0; text-align:center; }
     .contact-card { padding:54px 28px; border-radius:28px; color:#fff; background:#111; }
     .contact-card p { max-width:58ch; margin:0 auto 24px; color:rgba(255,255,255,.7); }
@@ -89,9 +108,12 @@
     .footer p { margin:5px 0 0; color:var(--muted); font-size:.86rem; }
     .footer-links { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px 18px; font-size:.88rem; font-weight:720; }
     @media (max-width:760px) {
-      .investor-hero { padding:78px 0 64px; }
+      .investor-hero { padding:60px 0 56px; }
       section { padding:64px 0; }
-      .grid.three,.thesis-grid,.footer-grid { grid-template-columns:1fr; }
+      .investor-hero-grid,.grid.three,.grid.four,.thesis-grid,.diligence-grid,.footer-grid { grid-template-columns:1fr; }
+      .product-proof { min-height:400px; margin-top:10px; }
+      .phone-frame { width:min(230px,68vw); }
+      .proof-label { right:6%; bottom:20px; }
       .card { min-height:0; }
       .footer-links { justify-content:flex-start; }
     }
@@ -100,23 +122,34 @@
 <body>
   <header class="site-header" data-site-header>
     <div class="site-header-shell">
-      <a class="site-brand" href="/" aria-label="Loom Life Manager home"><img src="/assets/landing/loom-icon.jpeg" alt="Loom app icon" width="34" height="34"><span class="site-brand-name"><span class="site-brand-name-full">Loom: Life Manager</span><span class="site-brand-name-short">Loom</span></span></a>
+      <a class="site-brand" href="/" aria-label="Loom Life Manager home"><img src="/assets/landing/loom-icon-128.jpg" alt="Loom app icon" width="34" height="34"><span class="site-brand-name"><span class="site-brand-name-full">Loom: Life Manager</span><span class="site-brand-name-short">Loom</span></span></a>
       <div class="site-nav-actions">
         <nav class="site-primary-links" aria-label="Primary navigation"><a href="/#system">How it works</a><a href="/#pricing" data-nav-link="pricing">Pricing</a><a href="/ambassadors/" data-nav-link="ambassadors">Ambassadors</a><a href="/articles/" data-nav-link="articles">Articles</a><a href="/support.html" data-nav-link="support">Support</a></nav>
-        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-investor-header&amp;mt=8">Get Loom</a>
+        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-investor-header-d1093d&amp;mt=8" data-app-store-cta data-cta-position="header" data-page-type="investor" data-content-slug="investor" data-content-cluster="life-management" data-target-keyword="Loom Life Manager" data-search-intent="direct-app-recommendation">Get Loom</a>
         <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-mobile-menu" aria-label="Open navigation menu" data-site-menu-toggle><span class="site-menu-icon" aria-hidden="true"></span><span data-site-menu-label>Menu</span></button>
       </div>
     </div>
     <div class="site-menu-backdrop" data-site-menu-dismiss aria-hidden="true"></div>
     <nav class="site-mobile-panel" id="site-mobile-menu" aria-label="Mobile navigation" aria-hidden="true">
       <div class="site-mobile-links"><a href="/">Home</a><a href="/#system">How it works</a><a href="/#pricing">Pricing</a><a href="/ambassadors/">Ambassadors</a><a href="/articles/" data-nav-link="articles">Articles</a><a href="/support.html">Support</a></div>
-      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-investor-mobile&amp;mt=8">Download on the App Store</a>
+      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-investor-mobile-246ac4&amp;mt=8" data-app-store-cta data-cta-position="mobile-menu" data-page-type="investor" data-content-slug="investor" data-content-cluster="life-management" data-target-keyword="Loom Life Manager" data-search-intent="direct-app-recommendation">Download on the App Store</a>
     </nav>
   </header>
 
   <main>
     <header class="investor-hero">
-      <div class="shell"><span class="eyebrow">Investor overview</span><h1>Live product, focused growth.</h1><p class="hero-lead">Loom has a connected life-management system on the App Store, flexible purchase options, and measurable acquisition paths.</p></div>
+      <div class="shell investor-hero-grid">
+        <div>
+          <span class="eyebrow">Investor overview</span>
+          <h1>Live product, focused growth.</h1>
+          <p class="hero-lead">Loom has a connected life-management system on the App Store, flexible purchase options, and measurable acquisition paths.</p>
+          <p class="hero-meta">Founder-led · Live on iPhone and iPad · Updated August 2026</p>
+        </div>
+        <div class="product-proof" aria-label="Loom product preview">
+          <div class="phone-frame"><img src="/assets/landing/loom-home-seo.jpg" width="331" height="720" alt="Loom home screen showing purpose, fulfillment, goals, and daily actions" loading="eager" fetchpriority="high"></div>
+          <div class="proof-label"><strong>Shipping product</strong><span>Available on the App Store</span></div>
+        </div>
+      </div>
     </header>
 
     <section>
@@ -125,6 +158,18 @@
           <article class="card"><span class="card-number">01</span><h3>Loom on iPhone and iPad</h3><p>Core Loom functionality is live: purpose, fulfillment areas, goals, Action Plans, Little Wins, reflection, capture, Apple Health signals, and LoomAI support.</p></article>
           <article class="card"><span class="card-number">02</span><h3>Flexible plans</h3><p>Customers can choose Annual with a 7-day free trial, Monthly for flexible access, or Lifetime for a one-time purchase.</p></article>
           <article class="card"><span class="card-number">03</span><h3>Measured acquisition</h3><p>Search-led education, the ambassador program, email, and campaign-tagged App Store links create observable discovery and conversion paths.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="operating-proof-heading">
+      <div class="shell">
+        <div class="section-intro"><span class="eyebrow">Operating proof</span><h2 id="operating-proof-heading">The fundamentals are already in place.</h2><p>This page avoids vanity projections. Current operating performance and economics can be shared privately with qualified investors.</p></div>
+        <div class="grid four">
+          <article class="card proof-stat"><strong>Live</strong><span>Consumer product distributed through Apple’s App Store.</span></article>
+          <article class="card proof-stat"><strong>2 platforms</strong><span>A focused experience for iPhone and iPad.</span></article>
+          <article class="card proof-stat"><strong>3 purchase paths</strong><span>Monthly, Annual with a 7-day trial, and Lifetime.</span></article>
+          <article class="card proof-stat"><strong>Measured</strong><span>Tagged acquisition paths connect campaigns to aggregate App Store outcomes.</span></article>
         </div>
       </div>
     </section>
@@ -140,12 +185,37 @@
       </div>
     </section>
 
+    <section aria-labelledby="diligence-heading">
+      <div class="shell diligence-grid">
+        <div class="section-intro">
+          <span class="eyebrow">Diligence</span>
+          <h2 id="diligence-heading">A clear measurement stack.</h2>
+          <p>Loom separates financial truth from engagement telemetry so operating decisions are based on the right source.</p>
+        </div>
+        <ul class="evidence-list">
+          <li><strong>Net revenue</strong><span>App Store Connect proceeds are the authoritative source for net revenue.</span></li>
+          <li><strong>Acquisition</strong><span>Campaign-tagged App Store links and channel reporting show aggregate discovery and conversion signals.</span></li>
+          <li><strong>Engagement</strong><span>Production analytics and diagnostics support funnel, retention, and product-quality decisions.</span></li>
+          <li><strong>Private operating detail</strong><span>Current results, unit economics, roadmap, and supporting exports are available in a qualified diligence conversation.</span></li>
+        </ul>
+      </div>
+    </section>
+
     <section class="contact-band">
-      <div class="shell"><div class="contact-card"><h2>Start a conversation.</h2><p>For investor or strategic-partnership inquiries, contact Loom founder Spencer Daugherty directly.</p><a class="button" href="mailto:spencer@loomlife.us?subject=Loom%20investor%20inquiry">Contact Spencer</a></div></div>
+      <div class="shell"><div class="contact-card"><h2>Start a conversation.</h2><p>For investor or strategic-partnership inquiries, contact Loom founder Spencer Daugherty directly. Qualified conversations can include current operating data and product-roadmap context.</p><a class="button" href="mailto:spencer@loomlife.us?subject=Loom%20investor%20inquiry">Request investor information</a></div></div>
     </section>
   </main>
 
-  <footer class="footer"><div class="shell footer-grid"><div><strong>Loom Life Manager</strong><p>&copy; 2026 Spencer Daugherty. All rights reserved.</p></div><nav class="footer-links" aria-label="Footer navigation"><a href="/articles/">Articles</a><a href="/investor/" aria-current="page">Investor</a><a href="/privacy.html">Privacy</a><a href="/support.html">Support</a><a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-investor-footer&amp;mt=8">App Store</a></nav></div></footer>
+  <footer class="footer"><div class="shell footer-grid"><div><strong>Loom Life Manager</strong><p>&copy; 2026 Spencer Daugherty. All rights reserved.</p></div><nav class="footer-links" aria-label="Footer navigation">
+        <a href="/">Home</a>
+        <a href="/ambassadors/">Ambassadors</a>
+        <a href="/articles/">Articles</a>
+        <a href="/investor/" aria-current="page">Investor</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/support.html">Support</a>
+        <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Terms (Apple EULA)</a>
+        <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-investor-footer-2bf8f1&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="investor" data-content-slug="investor" data-content-cluster="life-management" data-target-keyword="Loom Life Manager" data-search-intent="direct-app-recommendation">App Store</a>
+      </nav></div></footer>
   <script src="/assets/site-navigation.js?v=20260816-2" defer></script>
 </body>
 </html>

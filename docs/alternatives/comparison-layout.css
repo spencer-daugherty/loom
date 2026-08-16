@@ -1,0 +1,174 @@
+/* Responsive comparison treatment shared by Loom's buying guides. */
+.breadcrumb {
+  display: block;
+}
+
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breadcrumb li {
+  display: inline-flex;
+  align-items: center;
+}
+
+.breadcrumb li + li::before {
+  margin-right: 6px;
+  color: #8a9099;
+  content: "/";
+  speak: never;
+}
+
+.breadcrumb [aria-current="page"] {
+  color: #5d6470;
+}
+
+.comparison-table-card table caption,
+.fit-table caption {
+  padding: 14px 16px;
+  color: #5d6470;
+  background: #f7f8fa;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: left;
+}
+
+@media (max-width: 820px) {
+  .comparison-table-card,
+  .fit-table-wrap {
+    width: 100% !important;
+    margin-right: 0 !important;
+    margin-left: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  .comparison-table-card .table-wrap,
+  .fit-table-wrap {
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+  }
+
+  /* If JavaScript is unavailable the semantic table remains usable and
+     receives an explicit swipe affordance instead of silently clipping. */
+  .comparison-table-card .table-wrap:not(.comparison-layout-ready)::before,
+  .fit-table-wrap:not(.comparison-layout-ready)::before {
+    position: sticky;
+    left: 0;
+    display: block;
+    width: max-content;
+    margin: 0 0 10px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: #e8f2ff;
+    color: #0055ad;
+    content: "Swipe to compare \2192";
+    font-size: 0.8rem;
+    font-weight: 800;
+  }
+
+  .comparison-layout-ready {
+    overflow: visible !important;
+  }
+
+  .comparison-layout-ready table,
+  table.comparison-layout-ready {
+    display: block;
+    min-width: 0 !important;
+    border: 0;
+    background: transparent;
+  }
+
+  .comparison-layout-ready caption,
+  table.comparison-layout-ready caption {
+    display: block;
+    margin-bottom: 10px;
+    padding: 0;
+    background: transparent;
+    font-size: 0.82rem;
+  }
+
+  .comparison-layout-ready thead,
+  table.comparison-layout-ready thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .comparison-layout-ready tbody,
+  table.comparison-layout-ready tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .comparison-layout-ready tbody tr,
+  table.comparison-layout-ready tbody tr {
+    display: grid;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid rgba(17, 17, 17, 0.1);
+    border-radius: 18px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(17, 17, 17, 0.05);
+    scroll-snap-align: start;
+  }
+
+  .comparison-layout-ready tbody th,
+  .comparison-layout-ready tbody td,
+  table.comparison-layout-ready tbody th,
+  table.comparison-layout-ready tbody td {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 13px 15px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+    background: #ffffff;
+    font-size: 0.94rem;
+    line-height: 1.48;
+    overflow-wrap: anywhere;
+  }
+
+  .comparison-layout-ready tbody th,
+  table.comparison-layout-ready tbody th {
+    background: #f4f7fb;
+    color: #111111;
+    font-size: 1rem;
+  }
+
+  .comparison-layout-ready tbody td.loom-col,
+  table.comparison-layout-ready tbody td.loom-col {
+    background: linear-gradient(145deg, #edf6ff, #ffffff);
+  }
+
+  .comparison-layout-ready tbody td:last-child,
+  table.comparison-layout-ready tbody td:last-child {
+    border-bottom: 0;
+  }
+
+  .comparison-layout-ready tbody td::before,
+  table.comparison-layout-ready tbody td::before {
+    color: #5d6470;
+    content: attr(data-column-label);
+    font-size: 0.72rem;
+    font-weight: 850;
+    letter-spacing: 0.05em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+}

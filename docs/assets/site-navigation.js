@@ -63,6 +63,32 @@
     } catch (error) {}
   }
 
+  function currentFragmentTarget() {
+    if (!window.location.hash || window.location.hash.length < 2) return null;
+    try {
+      return document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    } catch (error) {
+      return document.getElementById(window.location.hash.slice(1));
+    }
+  }
+
+  /* Long pages that opt into smooth scrolling can leave a direct fragment entry
+     visibly travelling for several seconds. Settle the initial target immediately,
+     after layout is known, while preserving smooth scrolling for in-page clicks. */
+  var initialFragmentTarget = currentFragmentTarget();
+  if (initialFragmentTarget) {
+    var settleInitialFragment = function () {
+      var previousScrollBehavior = document.documentElement.style.scrollBehavior;
+      document.documentElement.style.scrollBehavior = 'auto';
+      initialFragmentTarget.scrollIntoView({ block: 'start', inline: 'nearest' });
+      document.documentElement.style.scrollBehavior = previousScrollBehavior;
+    };
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(settleInitialFragment);
+    });
+    window.addEventListener('load', settleInitialFragment, { once: true });
+  }
+
   function siteMotionMode() {
     var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var slowUpdate = window.matchMedia('(update: slow)').matches;
@@ -113,10 +139,49 @@
         });
     });
 
+    function playSiteEntrance(target) {
+      if (target.classList.contains('is-visible')) return;
+      target.classList.add('is-visible');
+
+      if (typeof target.animate !== 'function') return;
+      var full = mode === 'full';
+      target.animate(
+        full
+          ? [
+              { opacity: 0.72, transform: 'translate3d(0, 14px, 0)' },
+              { opacity: 1, transform: 'translate3d(0, 0, 0)' }
+            ]
+          : [{ opacity: 0.82 }, { opacity: 1 }],
+        {
+          duration: full ? 560 : 220,
+          delay: Number.parseInt(target.style.getPropertyValue('--site-motion-delay'), 10) || 0,
+          easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+          fill: 'none'
+        }
+      );
+
+      if (!full) return;
+      Array.from(target.querySelectorAll('.site-motion-child')).forEach(function (child, childIndex) {
+        if (typeof child.animate !== 'function') return;
+        child.animate(
+          [
+            { opacity: 0.7, transform: 'translate3d(0, 10px, 0) scale(0.992)' },
+            { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' }
+          ],
+          {
+            duration: 520,
+            delay: 80 + (childIndex * 55),
+            easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+            fill: 'none'
+          }
+        );
+      });
+    }
+
     var observer = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (!entry.isIntersecting) return;
-        entry.target.classList.add('is-visible');
+        playSiteEntrance(entry.target);
         observer.unobserve(entry.target);
       });
     }, { threshold: 0.01, rootMargin: '0px 0px -6% 0px' });
@@ -128,14 +193,23 @@
       });
     });
 
-    window.setTimeout(function () {
+    var fragmentTarget = currentFragmentTarget();
+    if (fragmentTarget) {
       targets.forEach(function (target) {
-        if (target.getBoundingClientRect().top < window.innerHeight * 1.15) {
-          target.classList.add('is-visible');
+        if (target === fragmentTarget || target.contains(fragmentTarget) || fragmentTarget.contains(target)) {
+          playSiteEntrance(target);
           observer.unobserve(target);
         }
       });
-    }, 2400);
+    }
+
+    window.setTimeout(function () {
+      targets.forEach(function (target) {
+        if (target.classList.contains('is-visible')) return;
+        playSiteEntrance(target);
+        observer.unobserve(target);
+      });
+    }, 1400);
 
     window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change', function (event) {
       if (!event.matches) return;
@@ -176,11 +250,11 @@
   function navigationSection() {
     var path = window.location.pathname.replace(/\/index\.html$/, '/');
     if (path.indexOf('/ambassadors/') === 0) return 'ambassadors';
-    if (path === '/support.html' || path === '/privacy.html') return 'support';
+    if (path === '/support.html') return 'support';
     if (path.indexOf('/founding-member/') === 0) return 'pricing';
-    if (path.indexOf('/investor/') === 0) return '';
+    if (path === '/articles/' || path.indexOf('/articles/') === 0) return 'articles';
     if (path === '/' || path === '/landing.html' || path === '/splash.html') return '';
-    return 'articles';
+    return '';
   }
 
   var currentSection = navigationSection();
@@ -198,6 +272,9 @@
     toggle.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
     panel.setAttribute('aria-hidden', open ? 'false' : 'true');
     panel.inert = !open;
+    document.querySelectorAll('main, footer').forEach(function (region) {
+      region.inert = open;
+    });
     if (label) label.textContent = open ? 'Close' : 'Menu';
 
     if (open) {
@@ -219,7 +296,25 @@
     if (event.target.closest('a')) setOpen(false, false);
   });
   document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') setOpen(false, true);
+    if (toggle.getAttribute('aria-expanded') !== 'true') return;
+    if (event.key === 'Escape') {
+      setOpen(false, true);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    var focusable = [toggle].concat(Array.from(panel.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')))
+      .filter(function (element) { return !element.inert && element.getClientRects().length > 0; });
+    if (!focusable.length) return;
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
   mobileQuery.addEventListener('change', function (event) {
     if (!event.matches) setOpen(false, false);

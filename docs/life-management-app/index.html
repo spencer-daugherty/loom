@@ -13,7 +13,7 @@
   <meta property="og:title" content="Best Life Manager App for iPhone? Loom Fit &amp; Limits">
   <meta property="og:description" content="See where Loom fits when you want goals, daily tasks, habits, life areas, projects, capture, and reflection connected on iPhone and iPad.">
   <meta property="og:url" content="https://loomlife.us/life-management-app/">
-  <meta property="og:updated_time" content="2026-08-11T09:00:00-04:00">
+  <meta property="og:updated_time" content="2026-08-16T09:00:00-04:00">
   <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Best Life Manager App for iPhone? Loom Fit &amp; Limits">
@@ -24,6 +24,197 @@
   <link rel="stylesheet" href="/assets/site-navigation.css?v=20260816-2">
   <link rel="stylesheet" href="/assets/editorial.css">
   <link rel="stylesheet" href="/assets/life-management-app.css?v=20260801-1">
+  <link rel="stylesheet" href="/alternatives/comparison-layout.css?v=20260816-1">
+  <style>
+    .life-local-nav {
+      position: sticky;
+      top: 66px;
+      z-index: 7;
+      border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+      background: rgba(251, 250, 247, 0.92);
+      backdrop-filter: blur(18px);
+    }
+
+    .life-local-nav .shell {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-block: 10px;
+      scrollbar-width: none;
+    }
+
+    .life-local-nav .shell::-webkit-scrollbar { display: none; }
+
+    .life-local-nav a {
+      display: inline-flex;
+      min-height: 44px;
+      flex: 0 0 auto;
+      align-items: center;
+      padding: 0 13px;
+      border: 1px solid rgba(17, 17, 17, 0.08);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.82);
+      color: #3f4650;
+      font-size: 0.82rem;
+      font-weight: 760;
+      text-decoration: none;
+    }
+
+    .life-local-nav a:focus-visible,
+    .life-disclosure > summary:focus-visible {
+      outline: 3px solid rgba(0, 122, 255, 0.42);
+      outline-offset: 3px;
+    }
+
+    .life-local-nav a:first-child {
+      border-color: rgba(0, 122, 255, 0.18);
+      background: rgba(0, 122, 255, 0.09);
+      color: #0055ad;
+    }
+
+    .life-disclosure {
+      margin: 34px 0;
+      overflow: hidden;
+      border: 1px solid rgba(17, 17, 17, 0.09);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 18px 50px rgba(26, 45, 75, 0.07);
+    }
+
+    .life-disclosure > summary {
+      position: relative;
+      padding: 20px 58px 20px 22px;
+      cursor: pointer;
+      color: #111111;
+      font-size: 1.06rem;
+      font-weight: 820;
+      list-style: none;
+    }
+
+    .life-disclosure > summary::-webkit-details-marker { display: none; }
+
+    .life-disclosure > summary::after {
+      position: absolute;
+      top: 50%;
+      right: 22px;
+      color: #007aff;
+      content: "+";
+      font-size: 1.55rem;
+      font-weight: 450;
+      transform: translateY(-52%);
+    }
+
+    .life-disclosure[open] > summary::after { content: "−"; }
+
+    .life-disclosure-content {
+      padding: 4px 22px 24px;
+      border-top: 1px solid rgba(17, 17, 17, 0.07);
+    }
+
+    .life-disclosure-content > h2:first-child {
+      margin-top: 22px;
+    }
+
+    #fit-guide,
+    #compare-options,
+    #how-it-works,
+    #real-life,
+    #loom-ai,
+    #limits,
+    #faq {
+      scroll-margin-top: 132px;
+    }
+
+    @media (max-width: 620px) {
+      .pillar-hero {
+        padding: 30px 0 28px;
+      }
+
+      .pillar-hero-grid {
+        grid-template-columns: minmax(0, 1fr) 126px;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .pillar-hero-grid > div:first-child { min-width: 0; }
+
+      .pillar-hero h1 {
+        max-width: 12ch;
+        margin: 13px 0 14px;
+        font-size: clamp(2rem, 9.4vw, 2.55rem);
+        line-height: 0.98;
+      }
+
+      .pillar-dek {
+        font-size: 0.96rem;
+        line-height: 1.48;
+      }
+
+      .pillar-hero .button-row {
+        display: grid;
+        gap: 5px;
+        margin-top: 18px;
+      }
+
+      .pillar-hero .button {
+        min-height: 46px;
+        padding-inline: 12px;
+        font-size: 0.86rem;
+      }
+
+      .pillar-hero .button.secondary {
+        border-color: transparent;
+        background: transparent;
+        color: #0055ad;
+      }
+
+      .life-hero-visual {
+        width: 126px;
+        min-height: 305px;
+        margin: 0;
+        padding: 8px 4px;
+        border-radius: 25px;
+      }
+
+      .life-hero-visual::before {
+        width: 148px;
+        height: 148px;
+      }
+
+      .life-hero-device { --device-width: 122px; }
+      .life-float-card { display: none; }
+
+      .life-local-nav .shell {
+        width: 100%;
+        padding-inline: 14px;
+      }
+
+      .pillar-main {
+        padding: 42px 0 58px;
+      }
+
+      .article-body h2 {
+        font-size: clamp(1.85rem, 9vw, 2.45rem);
+      }
+
+      .life-disclosure {
+        margin: 26px 0;
+        border-radius: 20px;
+      }
+
+      .life-disclosure > summary {
+        min-height: 58px;
+        padding: 16px 50px 16px 17px;
+      }
+
+      .life-disclosure > summary::after { right: 17px; }
+      .life-disclosure-content { padding: 0 14px 18px; }
+
+      .life-story-panel {
+        margin-block: 34px;
+      }
+    }
+  </style>
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-XTL8BKQYPW"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
@@ -42,8 +233,8 @@
       "name": "Best Life Manager App for iPhone? Loom Fit and Limits",
       "description": "Loom is an AI-assisted life manager for iPhone and iPad connecting goals, daily tasks, habits, life areas, projects, capture, and reflection.",
       "datePublished": "2026-07-29",
-      "dateModified": "2026-08-11",
-      "lastReviewed": "2026-08-11",
+      "dateModified": "2026-08-16",
+      "lastReviewed": "2026-08-16",
       "inLanguage": "en-US",
       "author": {
         "@id": "https://loomlife.us/articles/about-spencer-daugherty/#main"
@@ -244,7 +435,7 @@
           "name": "How much does Loom cost?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "As checked on August 11, 2026, the U.S. App Store lists Loom as a free download with Monthly ($15), Annual ($79), and Lifetime ($129) in-app purchase options. Storefront pricing can change."
+            "text": "As checked on August 16, 2026, the U.S. App Store lists Loom as a free download with Monthly ($15), Annual ($79), and Lifetime ($129) in-app purchase options. Storefront pricing can change."
           }
         },
         {
@@ -297,7 +488,7 @@
   <header class="site-header" data-site-header>
     <div class="site-header-shell">
       <a class="site-brand" href="/" aria-label="Loom Life Manager home">
-        <img src="/assets/landing/loom-icon.jpeg" alt="Loom app icon" width="34" height="34" decoding="async">
+        <img src="/assets/landing/loom-icon-128.jpg" alt="Loom app icon" width="34" height="34" decoding="async">
         <span class="site-brand-name"><span class="site-brand-name-full">Loom: Life Manager</span><span class="site-brand-name-short">Loom</span></span>
       </a>
       <div class="site-nav-actions">
@@ -308,7 +499,7 @@
           <a href="/articles/" data-nav-link="articles">Articles</a>
           <a href="/support.html" data-nav-link="support">Support</a>
         </nav>
-        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=organic-life-manager-260811-header&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="header" data-destination="app_store">Get Loom</a>
+        <a class="site-header-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-a-header-d3fc4a&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="header" data-destination="app_store">Get Loom</a>
         <button class="site-menu-toggle" type="button" aria-expanded="false" aria-controls="site-mobile-menu" aria-label="Open navigation menu" data-site-menu-toggle>
           <span class="site-menu-icon" aria-hidden="true"></span>
           <span data-site-menu-label>Menu</span>
@@ -325,7 +516,7 @@
         <a href="/articles/" data-nav-link="articles">Articles</a>
         <a href="/support.html" data-nav-link="support">Support</a>
       </div>
-      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=organic-life-manager-260811-mobile&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="mobile-menu" data-destination="app_store">Download on the App Store</a>
+      <a class="site-mobile-cta" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-a-mobile-m-1de3a7&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="mobile-menu" data-destination="app_store">Download on the App Store</a>
     </nav>
   </header>
   <main>
@@ -333,24 +524,11 @@
       <div class="shell pillar-hero-grid">
         <div>
           <span class="eyebrow">Life management app</span>
-          <h1>Life manager app for iPhone: connect goals, habits, daily tasks, and reflection.</h1>
-          <p class="pillar-dek">Loom connects Purpose, customizable Fulfillment Areas, Goals, Projects, Action Plans, daily Musts, Little Wins, Capture, and Reflection for iPhone and iPad users who have outgrown disconnected productivity tools.</p>
-          <div class="article-meta">
-            <a class="author-link" href="/articles/about-spencer-daugherty/">
-              <img src="/assets/landing/spencer-daugherty-headshot.png" alt="" width="34" height="34">
-              <span>By Spencer Daugherty</span>
-            </a>
-            <time datetime="2026-08-11">Updated August 11, 2026</time>
-            <span>Verified in Loom 2.0</span>
-          </div>
-          <ul class="life-fit-snapshot" aria-label="Loom fit at a glance">
-            <li><strong>Best fit</strong><span>Whole-life planning that connects purpose, goals, plans, daily priorities, and reflection.</span></li>
-            <li><strong>Platform</strong><span>Released for iPhone and iPad with iOS or iPadOS 17 or later.</span></li>
-            <li><strong>Access</strong><span>Free App Store download; continued access requires an in-app purchase.</span></li>
-          </ul>
+          <h1>One life manager app. Everything connected.</h1>
+          <p class="pillar-dek">Loom brings Purpose, life areas, Goals, Action Plans, Little Wins, Capture, Reflection, and LoomAI into one calm iPhone and iPad system.</p>
           <div class="button-row">
-            <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=organic-life-manager-260811-hero&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="hero" data-destination="app_store">Download Loom on the App Store</a>
-            <a class="button secondary" href="#fit-guide">See whether Loom fits</a>
+            <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-a-hero-4cd669&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="hero" data-destination="app_store">Download Loom on the App Store</a>
+            <a class="button secondary" href="#how-it-works">See how Loom works</a>
           </div>
         </div>
         <figure class="life-hero-visual">
@@ -370,16 +548,29 @@
       </div>
     </header>
 
+    <nav class="life-local-nav" aria-label="On this page">
+      <div class="shell">
+        <a href="#fit-guide">Is Loom a fit?</a>
+        <a href="#compare-options">Compare options</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#real-life">Daily workflow</a>
+        <a href="#limits">Limits</a>
+        <a href="#faq">FAQ</a>
+      </div>
+    </nav>
+
     <section class="pillar-main">
       <div class="reading-shell article-body">
       <div class="answer-box" id="fit-guide">
         <h2>What is the best life manager app for iPhone?</h2>
         <p><strong>Loom is an AI-assisted life-management app for iPhone and iPad.</strong> It is a strong fit for people who want Purpose, customizable Fulfillment Areas, Goals, Projects, finite Action Plans, daily Musts, repeatable Little Wins, Capture, and Reflection connected in one system.</p>
         <p>Choose something else if you need Android or web access, shared team-project management, or primarily calendar scheduling.</p>
-        <p class="answer-update"><strong>Reviewed August 11, 2026.</strong> This first-party guide is published by Loom. It uses released-product and official publisher sources and does not claim to be an independent ranking.</p>
+        <p class="answer-update"><strong>Updated August 16, 2026.</strong> This first-party guide is published by Loom. It uses released-product and official publisher sources and does not claim to be an independent ranking.</p>
       </div>
       <p>A life management app helps you decide what deserves attention across work and personal life—not merely store more tasks. Loom is built for iPhone and iPad users whose responsibilities span goals, routines, relationships, health, money, work, learning, and the incoming details of an ordinary day.</p>
-      <h2>Five criteria for choosing a life manager app</h2>
+      <details class="life-disclosure">
+        <summary>Five criteria for choosing a life manager app</summary>
+        <div class="life-disclosure-content">
       <ol>
         <li><strong>Whole-life structure:</strong> Can you organize work, health, relationships, money, learning, and custom areas without forcing everything into one task list?</li>
         <li><strong>Goals that reach today:</strong> Can a long-term Goal become a finite Action Plan, a current Must, and repeatable daily progress?</li>
@@ -387,10 +578,15 @@
         <li><strong>Realistic product fit:</strong> Does the released app support your devices and workflow, and are its limits stated clearly?</li>
         <li><strong>Current evidence:</strong> Are capabilities, screenshots, prices, publisher, and update dates verifiable through an official listing rather than future promises?</li>
       </ol>
+        </div>
+      </details>
+      <details class="life-disclosure" id="compare-options">
+        <summary>Compare Loom with six popular planning approaches</summary>
+        <div class="life-disclosure-content">
       <h2>How Loom compares with frequently recommended iPhone options</h2>
       <p>These apps solve different planning problems. The useful question is not which product has the longest feature list; it is which product’s built-in model matches the way you need to plan.</p>
       <div class="fit-table-wrap">
-        <table class="fit-table">
+        <table class="fit-table"><caption>Loom and frequently recommended iPhone planning apps compared by product focus and fit.</caption>
           <thead>
             <tr>
               <th scope="col">App</th>
@@ -401,7 +597,7 @@
           </thead>
           <tbody>
             <tr class="fit-table-loom">
-              <th scope="row"><a href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">Loom</a></th>
+              <th scope="row"><a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-ap-source-4bf5c0&amp;mt=8" data-app-store-cta data-cta-position="source" data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation">Loom</a></th>
               <td>A life management system connecting purpose, life areas, goals, projects, plans, daily priorities, repeatable progress, capture, reflection, and AI guidance.</td>
               <td>A structured whole-life system on iPhone and iPad.</td>
               <td>You already match Loom’s high-fit workflow.</td>
@@ -445,11 +641,13 @@
           </tbody>
         </table>
       </div>
-      <p class="comparison-note">Comparison reviewed August 11, 2026 using each publisher’s official product pages. Features and availability can change; follow the linked source for the latest details.</p>
+      <p class="comparison-note">Source review date: August 16, 2026. This is a first-party Loom comparison using each publisher’s official product pages. Features and availability can change; follow the linked source for current details.</p>
+        </div>
+      </details>
       <h2>Why separate productivity tools start to feel disconnected</h2>
       <p>A task manager can show what is due. A habit tracker can show what repeated. A notes app can remember context. A goal app can preserve ambition. Each tool can work well and still leave you responsible for reconstructing how everything relates.</p>
       <p>The missing layer is often not another feature. It is a shared structure that connects what matters, what should change, what needs action, what should repeat, and what the last week taught you.</p>
-      <h2>How Loom organizes the whole loop</h2>
+      <h2 id="how-it-works">How Loom organizes the whole loop</h2>
       <div class="card-grid life-capability-grid">
         <article class="card"><span class="life-card-icon life-icon-purpose" aria-hidden="true"><i></i></span><h3>Purpose</h3><p>Describe your larger direction and the Passions that reveal what drives you.</p></article>
         <article class="card"><span class="life-card-icon life-icon-radar" aria-hidden="true"><i></i></span><h3>Fulfillment Areas</h3><p>Create 3–7 areas that represent the important parts of your life, including custom areas.</p></article>
@@ -458,7 +656,9 @@
         <article class="card"><span class="life-card-icon life-icon-wins" aria-hidden="true"><i></i><i></i><i></i></span><h3>Little Wins</h3><p>Keep a few repeatable daily actions visible where they contribute to meaningful progress.</p></article>
         <article class="card"><span class="life-card-icon life-icon-capture" aria-hidden="true"></span><h3>Capture and Reflection</h3><p>Collect incoming context, then review what happened and adjust what comes next.</p></article>
       </div>
-      <div class="source-box">
+      <details class="life-disclosure">
+        <summary>Current features, pricing, and compatibility</summary>
+        <div class="life-disclosure-content">
         <h2>Released Loom product facts</h2>
         <ul>
           <li><strong>Devices:</strong> iPhone and iPad, requiring iOS 17.0 or iPadOS 17.0 or later.</li>
@@ -466,8 +666,9 @@
           <li><strong>Released capabilities:</strong> Purpose, customizable Fulfillment Areas, Goals, Projects with milestone Gantt timelines, Action Plans, Musts, Little Wins, Capture, Reflection, LoomAI guidance, optional Apple Health signals, widgets, and iMessage assignments.</li>
           <li><strong>Current release:</strong> Version 2.0, published by Spencer Ray Daugherty in the Productivity category.</li>
         </ul>
-        <p>Verified August 11, 2026 against the <a href="https://apps.apple.com/us/app/loom-life-manager/id6759817760">official U.S. App Store listing for Loom: Life Manager</a>. Prices and compatibility can change; Apple’s listing is the current source of truth.</p>
-      </div>
+        <p>Source review date: August 16, 2026. These facts were checked against the <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-ap-source-07ab46&amp;mt=8" data-app-store-cta data-cta-position="source" data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation">official U.S. App Store listing for Loom: Life Manager</a>. Prices and compatibility can change; Apple’s listing is the current source of truth.</p>
+        </div>
+      </details>
 
       <div class="life-story-panel life-story-panel-goals">
         <div class="life-story-copy">
@@ -485,7 +686,7 @@
         </div>
       </div>
 
-      <h2>A realistic day inside a life management app</h2>
+      <h2 id="real-life">A realistic day inside a life management app</h2>
       <p>You capture a request from an email, notice that a Health &amp; Energy Little Win is still open, complete the Must that advances a current Goal, and reschedule an action that depends on another person. Later, Reflection helps you recognize what worked and what should change.</p>
       <p>The point is not to touch every feature every day. It is to keep the information available inside one model so that the next decision does not require rebuilding your life from several apps.</p>
       <ol class="step-list">
@@ -498,7 +699,7 @@
       <div class="answer-box">
         <h2>Try this connected workflow on iPhone</h2>
         <p>If this matches the problem you are trying to solve, review Loom’s current App Store listing and decide whether the whole-life structure is worth testing.</p>
-        <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=organic-life-manager-260811-workflow&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="workflow-proof" data-destination="app_store">See Loom on the App Store</a>
+        <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-a-workflow-063d2d&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="workflow-proof" data-destination="app_store">See Loom on the App Store</a>
       </div>
       <div class="example-box">
         <h2>Example: a demanding launch week</h2>
@@ -521,11 +722,8 @@
         </div>
       </div>
 
-      <h2>Where LoomAI fits</h2>
-      <p>LoomAI can help clarify Goals, draft Action Plans, suggest Little Wins, rewrite notes, and explore priorities using the context already present in Loom. It supports the system; it is not the system. The user remains responsible for choosing what matters and approving what becomes part of the plan.</p>
-      <h2>Can AI help you make a life plan?</h2>
-      <p>Yes—but the most useful result is a draft you can review, not a finished answer about how to live. An AI assistant can help you name the important areas of life, describe a desired change, turn it into a Goal, identify the next finite actions, choose a few repeatable actions, and suggest questions for a weekly review.</p>
-      <p>Loom: Life Manager is an iPhone and iPad app for carrying that plan forward after the conversation. Purpose and Fulfillment Areas preserve direction; Goals describe the change; Action Plans and Musts organize finite work; Little Wins support repeatable progress; Capture holds incoming context; and Reflection helps the plan evolve. LoomAI can assist inside that structure, while you remain responsible for the decisions.</p>
+      <h2 id="loom-ai">Where LoomAI fits</h2>
+      <p>LoomAI can clarify Goals, draft Action Plans, suggest Little Wins, rewrite notes, and explore priorities using the context already present in Loom. It helps turn a conversation into a draft you can review inside the same system; you remain responsible for choosing what matters and approving every change.</p>
 
       <div class="life-story-panel life-story-panel-ai">
         <div class="life-story-copy">
@@ -543,7 +741,7 @@
         </div>
       </div>
 
-      <div class="limits-box">
+      <div class="limits-box" id="limits">
         <h2>Who Loom is not for</h2>
         <p>Loom is not available as an Android or web app, and it is not designed as a shared team-project workspace, clinical or mental-health tool, or calendar-only planner. If you need only a grocery list, appointments, or habit streaks, a specialized app may be a simpler fit.</p>
       </div></div>
@@ -599,7 +797,7 @@
 <details><summary>What is a life management app?</summary><div class="faq-answer">A life management app helps organize goals, tasks, repeatable actions, life areas, incoming commitments, and review in one connected system.</div></details>
 <details><summary>How is Loom different from a to-do list?</summary><div class="faq-answer">A to-do list primarily stores finite actions. Loom connects Action Plans to Purpose, Fulfillment Areas, Goals, Little Wins, Capture, and Reflection.</div></details>
 <details><summary>Does Loom work on Android or the web?</summary><div class="faq-answer">Loom is released for iPhone and iPad through the App Store and requires iOS or iPadOS 17 or later. Do not choose Loom if Android or browser-based web access is a current requirement.</div></details>
-<details><summary>How much does Loom cost?</summary><div class="faq-answer">As checked on August 11, 2026, the U.S. App Store lists Loom as a free download with Monthly ($15), Annual ($79), and Lifetime ($129) in-app purchase options. Storefront pricing can change.</div></details>
+<details><summary>How much does Loom cost?</summary><div class="faq-answer">As checked on August 16, 2026, the U.S. App Store lists Loom as a free download with Monthly ($15), Annual ($79), and Lifetime ($129) in-app purchase options. Storefront pricing can change.</div></details>
 <details><summary>Does Loom use Apple Health?</summary><div class="faq-answer">Apple Health support is optional and permission-based. Supported signals can help ground configured Goals and Little Wins without making health guarantees.</div></details>
 <details><summary>Can AI help me make a life plan?</summary><div class="faq-answer">AI can help draft life areas, goals, next actions, and repeatable progress, but the result should remain a user-reviewed draft. Loom keeps those decisions connected on iPhone and iPad after the conversation through Goals, Action Plans, Musts, Little Wins, Capture, and Reflection.</div></details>
 <details><summary>What iPhone app connects long-term goals with today's priorities?</summary><div class="faq-answer">Loom is designed for this fit. Goals connect to finite Action Plans, current Musts, and repeatable Little Wins, while Purpose and Fulfillment Areas preserve why the work matters.</div></details>
@@ -614,7 +812,7 @@
           <h2>Connect what matters to what you do.</h2>
           <p>Loom is built for iPhone and iPad users who want Goals, tasks, repeatable progress, Purpose, and Reflection in one calm system.</p>
           <div class="button-row">
-            <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=organic-life-manager-260811-bottom&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="bottom" data-destination="app_store">Get Loom on the App Store</a>
+            <a class="button primary" href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-a-bottom-4918d4&amp;mt=8" data-app-store-cta data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation" data-position-id="life-manager-iphone" data-cta-position="bottom" data-destination="app_store">Get Loom on the App Store</a>
           </div>
         </div>
       </div>
@@ -627,14 +825,20 @@
         <p>&copy; 2026 Spencer Daugherty. All rights reserved.</p>
       </div>
       <nav class="footer-links" aria-label="Footer navigation">
+        <a href="/">Home</a>
+        <a href="/ambassadors/">Ambassadors</a>
         <a href="/articles/">Articles</a>
-        <a href="/articles/about-spencer-daugherty/">About the author</a>
-        <a href="/articles/editorial-policy/">Editorial policy</a>
+        <a href="/investor/">Investor</a>
         <a href="/privacy.html">Privacy</a>
         <a href="/support.html">Support</a>
+        <a href="/articles/about-spencer-daugherty/">About the author</a>
+        <a href="/articles/editorial-policy/">Editorial policy</a>
+        <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Terms (Apple EULA)</a>
+        <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-life-management-a-footer-70f9ec&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="pillar" data-content-slug="life-management-app" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation">App Store</a>
       </nav>
     </div>
   </footer>
+  <script src="/alternatives/comparison-layout.js?v=20260816-1" defer></script>
   <script src="/assets/site-navigation.js?v=20260816-2" defer></script>
 </body>
 </html>
