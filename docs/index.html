@@ -3092,11 +3092,12 @@
       }
 
       .motion-ready.motion-full .ecosystem-route-glow.is-flowing {
-        animation: ecosystem-glow-flow var(--route-flow-duration, 4.6s) linear var(--route-flow-delay, 0s) 1;
+        animation: ecosystem-glow-flow var(--route-flow-duration, 5.4s) linear var(--route-flow-delay, 0s) 2;
         animation-play-state: paused;
       }
 
       .motion-ready.motion-full .ecosystem-card.is-motion-active .ecosystem-route-glow.is-flowing {
+        opacity: 0.24;
         animation-play-state: running;
       }
 
@@ -4805,7 +4806,7 @@
     }
 
   </style>
-  <link rel="stylesheet" href="/assets/site-navigation.css?v=20260816-1">
+  <link rel="stylesheet" href="/assets/site-navigation.css?v=20260816-2">
   <link rel="stylesheet" href="/assets/comparison-graphics.css?v=20260722-4">
 </head>
 <body>
@@ -5755,9 +5756,10 @@
       !("IntersectionObserver" in window)
     )
       ? "off"
-      : ((motionMemory && motionMemory <= 4) || (motionCores && motionCores <= 4) ? "lite" : "full");
+      : (motionMemory && (motionMemory <= 2 || (motionMemory <= 4 && motionCores && motionCores <= 2)) ? "lite" : "full");
     const allowsMotion = motionMode !== "off";
     const allowsFullMotion = motionMode === "full";
+    document.documentElement.dataset.motionMode = motionMode;
     document.documentElement.classList.add(`motion-${motionMode}`);
 
     const carousel = document.querySelector("[data-carousel]");
@@ -5965,13 +5967,13 @@
         const glow = document.createElementNS(svgNamespace, "path");
         const glowLength = 9 + (seed % 7);
         const glowStart = -((seed * 11) % 82);
-        glow.setAttribute("class", `ecosystem-route-glow ecosystem-route-${routeType}-glow${seed % 3 === 0 ? " is-flowing" : ""}`);
+        glow.setAttribute("class", `ecosystem-route-glow ecosystem-route-${routeType}-glow${seed % 2 === 0 ? " is-flowing" : ""}`);
         glow.setAttribute("d", pathData);
         glow.setAttribute("pathLength", "100");
         glow.setAttribute("stroke", color);
         glow.style.strokeDasharray = `${glowLength} ${100 - glowLength}`;
         glow.style.strokeDashoffset = `${glowStart}`;
-        glow.style.setProperty("--route-flow-duration", `${4.2 + ((seed % 6) * 0.12)}s`);
+        glow.style.setProperty("--route-flow-duration", `${4.8 + ((seed % 6) * 0.14)}s`);
         glow.style.setProperty("--route-flow-delay", `${-((seed % 8) * 0.48)}s`);
         glow.style.setProperty("--route-glow-delay", `${520 + ((seed % 5) * 55)}ms`);
         ecosystemRoutes.append(glow);
@@ -6167,7 +6169,11 @@
         });
       }, { threshold: 0.08, rootMargin: "0px 0px -7% 0px" });
 
-      revealTargets.forEach((target) => revealObserver.observe(target));
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          revealTargets.forEach((target) => revealObserver.observe(target));
+        });
+      });
 
       reducedMotionQuery.addEventListener?.("change", (event) => {
         if (!event.matches) return;
@@ -6271,6 +6277,6 @@
     pricingObserver.observe(pricingSection);
   }
 </script>
-  <script src="/assets/site-navigation.js?v=20260816-1" defer></script>
+  <script src="/assets/site-navigation.js?v=20260816-2" defer></script>
 </body>
 </html>

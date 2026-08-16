@@ -72,7 +72,10 @@
     var cores = Number(navigator.hardwareConcurrency || 0);
 
     if (reducedMotion || slowUpdate || savesData || !('IntersectionObserver' in window)) return 'off';
-    if ((memory && memory <= 4) || (cores && cores <= 4)) return 'lite';
+
+    /* Safari may deliberately report a small processor count on capable iPhones.
+       Only downgrade when the browser also exposes a genuinely low memory signal. */
+    if (memory && (memory <= 2 || (memory <= 4 && cores && cores <= 2))) return 'lite';
     return 'full';
   }
 
@@ -81,6 +84,7 @@
     if (path === '/') return;
 
     var mode = siteMotionMode();
+    document.documentElement.dataset.motionMode = mode;
     document.documentElement.classList.add('site-motion-' + mode);
     if (mode === 'off') return;
 
@@ -118,7 +122,11 @@
     }, { threshold: 0.01, rootMargin: '0px 0px -6% 0px' });
 
     document.documentElement.classList.add('site-motion-ready');
-    targets.forEach(function (target) { observer.observe(target); });
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(function () {
+        targets.forEach(function (target) { observer.observe(target); });
+      });
+    });
 
     window.setTimeout(function () {
       targets.forEach(function (target) {
