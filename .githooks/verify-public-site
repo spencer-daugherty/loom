@@ -6,6 +6,22 @@ mode="${1:---commit}"
 ref="${2:-HEAD}"
 
 case "$mode" in
+  --worktree)
+    require_path() {
+      [ -f "$1" ]
+    }
+    read_path() {
+      cat "$1"
+    }
+    list_paths() {
+      if [ -d "$1" ]; then
+        find "$1" -type f -print
+      elif [ -f "$1" ]; then
+        printf '%s\n' "$1"
+      fi
+    }
+    label="working tree"
+    ;;
   --index)
     require_path() {
       git cat-file -e ":$1" 2>/dev/null
@@ -41,6 +57,8 @@ docs/CNAME
 docs/.nojekyll
 docs/robots.txt
 docs/sitemap.xml
+assets/analytics.js
+docs/assets/analytics.js
 docs/assets/landing/loom-icon.jpeg
 docs/assets/landing/loom-hero-phone.png
 docs/assets/landing/loom-home.png'
@@ -63,6 +81,44 @@ fi
 asset_count=$(list_paths docs/assets/landing | awk 'NF { count++ } END { print count + 0 }')
 if [ "$asset_count" -lt 10 ]; then
   echo "Expected at least 10 public Loom website assets; found $asset_count" >&2
+  failed=1
+fi
+
+source_analytics=$(read_path assets/analytics.js 2>/dev/null || true)
+deployed_analytics=$(read_path docs/assets/analytics.js 2>/dev/null || true)
+if [ "$source_analytics" != "$deployed_analytics" ]; then
+  echo "Source and deployed analytics loaders must match." >&2
+  failed=1
+fi
+
+direct_ga_paths=$(
+  list_paths docs |
+    awk '/\.html$/' |
+    while IFS= read -r path; do
+      if read_path "$path" | grep -q 'googletagmanager.com/gtag/js'; then
+        printf '%s\n' "$path"
+      fi
+    done
+)
+if [ -n "$direct_ga_paths" ]; then
+  echo "Direct Google Analytics loader found; use /assets/analytics.js instead:" >&2
+  printf '%s\n' "$direct_ga_paths" >&2
+  failed=1
+fi
+
+event_without_loader_paths=$(
+  list_paths docs |
+    awk '/\.html$/' |
+    while IFS= read -r path; do
+      if read_path "$path" | grep -q 'gtag(' &&
+        ! read_path "$path" | grep -q '/assets/analytics.js'; then
+        printf '%s\n' "$path"
+      fi
+    done
+)
+if [ -n "$event_without_loader_paths" ]; then
+  echo "Analytics events found without the controlled loader:" >&2
+  printf '%s\n' "$event_without_loader_paths" >&2
   failed=1
 fi
 
