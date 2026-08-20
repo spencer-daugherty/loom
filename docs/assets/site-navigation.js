@@ -16,6 +16,7 @@
         content_cluster: appStoreLink.dataset.contentCluster || '',
         target_keyword: appStoreLink.dataset.targetKeyword || '',
         search_intent: appStoreLink.dataset.searchIntent || '',
+        competitor: appStoreLink.dataset.competitor || '',
         cta_position: appStoreLink.dataset.ctaPosition || '',
         article_slug: appStoreLink.dataset.contentSlug || '',
         position_id: appStoreLink.dataset.positionId || '',
