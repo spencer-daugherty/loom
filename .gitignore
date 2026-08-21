@@ -5,6 +5,7 @@
 
 # Git metadata/configuration for the website repo.
 !.gitignore
+!AGENTS.md
 !.githooks/
 !.githooks/**
 
