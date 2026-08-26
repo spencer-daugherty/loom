@@ -117,7 +117,7 @@
         <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-founding-member-footer-b3270b&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="site" data-content-slug="founding-member" data-content-cluster="life-management" data-target-keyword="Loom Life Manager" data-search-intent="direct-app-recommendation">App Store</a>
       </nav></div></footer>
   <script>
-    document.addEventListener('click',function(event){if(typeof gtag!=='function')return;var app=event.target.closest('[data-app-store-cta]');if(app){gtag('event','app_store_click',{page_type:app.dataset.pageType||'',target_keyword:app.dataset.targetKeyword||'',cta_position:app.dataset.ctaPosition||'',destination:'app_store'});}var hero=event.target.closest('[data-hero-cta]');if(hero){gtag('event','hero_cta_click',{page_type:hero.dataset.pageType||'',target_keyword:hero.dataset.targetKeyword||'',cta_position:hero.dataset.ctaPosition||''});}});
+    document.addEventListener('click',function(event){if(typeof gtag!=='function')return;var hero=event.target.closest('[data-hero-cta]');if(hero){gtag('event','hero_cta_click',{page_type:hero.dataset.pageType||'',target_keyword:hero.dataset.targetKeyword||'',cta_position:hero.dataset.ctaPosition||''});}});
     document.querySelectorAll('#faq details').forEach(function(detail){detail.addEventListener('toggle',function(){if(typeof gtag!=='function'||!detail.open)return;var summary=detail.querySelector('summary');gtag('event','faq_expand',{page_type:'lifetime-access',faq_question:summary?summary.textContent.trim():''});});});
   </script>
   <script src="/assets/site-navigation.js?v=20260816-2" defer></script>

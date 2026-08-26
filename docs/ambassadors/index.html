@@ -1186,12 +1186,6 @@
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    document.addEventListener('click', function(event) {
-      var app = event.target.closest('[data-app-store-cta]');
-      if (app && typeof gtag === 'function') {
-        gtag('event', 'app_store_click', {page_type: 'ambassadors', cta_position: app.dataset.ctaPosition || '', destination: 'app_store'});
-      }
-    });
     document.querySelectorAll('#faq details').forEach(function(detail) {
       detail.addEventListener('toggle', function() {
         if (!detail.open || typeof gtag !== 'function') return;

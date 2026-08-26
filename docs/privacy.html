@@ -843,19 +843,6 @@
         <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-privacy-footer-f02896&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="site" data-content-slug="privacy" data-content-cluster="life-management" data-target-keyword="Loom Life Manager" data-search-intent="direct-app-recommendation">App Store</a>
       </nav>
     </footer>
-<script>
-  document.addEventListener('click', function(event) {
-    var link = event.target.closest('[data-app-store-cta]');
-    if (!link || typeof gtag !== 'function') return;
-    gtag('event', 'app_store_click', {
-      page_type: link.dataset.pageType || '',
-      target_keyword: link.dataset.targetKeyword || '',
-      competitor: link.dataset.competitor || '',
-      cta_position: link.dataset.ctaPosition || '',
-      destination: 'app_store'
-    });
-  });
-</script>
   <script src="/assets/site-navigation.js?v=20260816-2" defer></script>
 </body>
 </html>

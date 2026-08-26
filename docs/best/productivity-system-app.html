@@ -196,19 +196,6 @@
   </div>
 </footer>
 
-<script>
-  document.addEventListener('click', function(event) {
-    var link = event.target.closest('[data-app-store-cta]');
-    if (!link || typeof gtag !== 'function') return;
-    gtag('event', 'app_store_click', {
-      page_type: link.dataset.pageType || '',
-      target_keyword: link.dataset.targetKeyword || '',
-      competitor: link.dataset.competitor || '',
-      cta_position: link.dataset.ctaPosition || '',
-      destination: 'app_store'
-    });
-  });
-</script>
   <script src="../alternatives/comparison-layout.js?v=20260816-1" defer></script>
   <script src="/assets/site-navigation.js?v=20260816-2" defer></script>
 </body>
