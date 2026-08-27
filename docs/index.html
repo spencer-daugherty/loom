@@ -13,7 +13,7 @@
   <meta property="og:title" content="Loom Life Manager for iPhone &amp; iPad | Goals, Habits &amp; AI">
   <meta property="og:description" content="Loom connects purpose, goals, action plans, Little Wins, reflection, Apple Health signals, and LoomAI in one life management app for iPhone and iPad.">
   <meta property="og:url" content="https://loomlife.us/">
-  <meta property="og:updated_time" content="2026-08-16T15:00:00-04:00">
+  <meta property="og:updated_time" content="2026-08-26T15:00:00-04:00">
   <meta property="og:image" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:url" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
   <meta property="og:image:secure_url" content="https://loomlife.us/assets/landing/loom-share-preview-20260511.jpg">
@@ -52,7 +52,7 @@
       "name": "Loom: Life Manager",
       "description": "A life management app for iPhone and iPad that connects purpose, goals, action plans, Little Wins, capture, reflection, Apple Health signals, and LoomAI.",
       "inLanguage": "en-US",
-      "dateModified": "2026-08-16",
+      "dateModified": "2026-08-26",
       "publisher": {
         "@id": "https://loomlife.us/#organization"
       },
@@ -1522,6 +1522,86 @@
       color: var(--muted);
       font-size: 0.8rem;
       font-style: italic;
+      line-height: 1.45;
+    }
+
+    .paywall-reviews-section {
+      overflow: hidden;
+      padding-bottom: 0;
+      background: #ffffff;
+    }
+
+    .paywall-reviews {
+      display: grid;
+      gap: 12px;
+    }
+
+    .paywall-reviews-heading {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.012em;
+      line-height: 1.25;
+    }
+
+    .paywall-reviews-track {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-inline: -2px;
+      padding: 4px 2px;
+      overflow-x: auto;
+      overscroll-behavior-inline: contain;
+      scroll-padding-inline: 2px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .paywall-reviews-track::-webkit-scrollbar {
+      display: none;
+    }
+
+    .paywall-reviews-track:focus-visible {
+      border-radius: 10px;
+      outline: 3px solid rgba(0, 122, 255, 0.3);
+      outline-offset: 4px;
+    }
+
+    .paywall-review-card {
+      display: flex;
+      flex: 0 0 clamp(248px, calc(100vw - 56px), 320px);
+      flex-direction: column;
+      gap: 12px;
+      min-height: 272px;
+      padding: 18px;
+      border: 1px solid rgba(29, 29, 31, 0.12);
+      border-radius: 8px;
+      color: var(--ink);
+      background: #f2f2f7;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .paywall-review-card h3 {
+      margin: 0;
+      font-size: 1.125rem;
+      font-weight: 700;
+      letter-spacing: -0.012em;
+      line-height: 1.25;
+    }
+
+    .paywall-review-stars {
+      display: flex;
+      gap: 4px;
+      color: rgb(242, 173, 41);
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1;
+    }
+
+    .paywall-review-card p {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1rem;
       line-height: 1.45;
     }
 
@@ -6102,6 +6182,52 @@
       </div>
     </section>
 
+    <section class="paywall-reviews-section" id="reviews" aria-labelledby="paywall-reviews-heading">
+      <div class="shell">
+        <div class="paywall-reviews">
+          <h2 class="paywall-reviews-heading" id="paywall-reviews-heading">What Loom users are saying:</h2>
+          <p class="visually-hidden" id="paywall-reviews-scroll-hint">Seven Loom user stories. Scroll horizontally to read more.</p>
+          <div class="paywall-reviews-track" role="region" aria-labelledby="paywall-reviews-heading" aria-describedby="paywall-reviews-scroll-hint" tabindex="0">
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. Good app if you are motivated to set life goals! This app can really organize your life goals and celebrate little wins along the way. Great app!">
+              <h3>Good app if you are motivated to set life goals!</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>This app can really organize your life goals and celebrate little wins along the way. Great app!</p>
+            </article>
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. Super organized. Loom is honestly a really helpful app for me to keep my life together. Everything is in one place, which makes staying organized easier.">
+              <h3>Super organized</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>Loom is honestly a really helpful app for me to keep my life together. Everything is in one place, which makes staying organized easier.</p>
+            </article>
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. Executive clarity, every week. Loom connects company priorities to a focused weekly plan while keeping the health and relationship commitments that help me perform at my best visible.">
+              <h3>Executive clarity, every week</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>Loom connects company priorities to a focused weekly plan while keeping the health and relationship commitments that help me perform at my best visible.</p>
+            </article>
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. From vision to momentum. Loom turns my biggest vision into milestones and the few actions that matter this week. I spend less time reacting and more time building what matters.">
+              <h3>From vision to momentum</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>Loom turns my biggest vision into milestones and the few actions that matter this week. I spend less time reacting and more time building what matters.</p>
+            </article>
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. Structure that works with ADHD. Capture gives every thought a place, then Loom helps me choose what matters now. I can move forward without holding the whole plan in my head.">
+              <h3>Structure that works with ADHD</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>Capture gives every thought a place, then Loom helps me choose what matters now. I can move forward without holding the whole plan in my head.</p>
+            </article>
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. A semester I can manage. I turn long assignments into milestones, organize my next actions, and still protect time for health and friends. My semester finally feels manageable.">
+              <h3>A semester I can manage</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>I turn long assignments into milestones, organize my next actions, and still protect time for health and friends. My semester finally feels manageable.</p>
+            </article>
+            <article class="paywall-review-card" role="group" aria-label="Five-star Loom user story. Ambition without losing balance. Loom connects my career goals, family, health, and daily Little Wins. I can make progress without letting one part of life crowd out everything else.">
+              <h3>Ambition without losing balance</h3>
+              <div class="paywall-review-stars" aria-label="Five stars"><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span><span aria-hidden="true">★</span></div>
+              <p>Loom connects my career goals, family, health, and daily Little Wins. I can make progress without letting one part of life crowd out everything else.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="pricing">
       <div class="shell">
         <div class="section-head">
@@ -6546,6 +6672,7 @@
         <a href="/articles/">Articles</a>
         <a href="/investor/">Investor</a>
         <a href="/privacy.html">Privacy</a>
+        <a href="/accessibility/">Accessibility</a>
         <a href="/support.html">Support</a>
         <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/">Terms (Apple EULA)</a>
         <a href="https://apps.apple.com/app/apple-store/id6759817760?pt=128588318&amp;ct=web-home-footer-32db97&amp;mt=8" data-app-store-cta data-cta-position="footer" data-page-type="homepage" data-content-slug="homepage" data-content-cluster="life-management" data-target-keyword="life manager app for iPhone" data-search-intent="direct_app_recommendation">App Store</a>
@@ -7071,6 +7198,8 @@
         "#integrations .grid",
         "#research .section-head",
         "#research .research-grid",
+        "#reviews .paywall-reviews-heading",
+        "#reviews .paywall-reviews-track",
         "#pricing .section-head",
         "#pricing .plans",
         "#pricing .pricing-action",
