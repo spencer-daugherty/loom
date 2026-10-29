@@ -495,12 +495,18 @@
 
     .rating-row {
       display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 12px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
       margin: 0 0 18px;
       color: var(--muted);
       font-weight: 680;
+    }
+
+    .rating-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .rating-score {
@@ -508,10 +514,19 @@
       font-weight: 850;
     }
 
+    .rating-date {
+      font-size: 0.75rem;
+      line-height: 1.4;
+      font-weight: 500;
+    }
+
     .stars {
       color: var(--orange);
-      font-size: 2em;
-      letter-spacing: 0.08em;
+      font-size: 1.125em;
+      letter-spacing: 0.04em;
+      background: linear-gradient(to right, var(--orange) 94%, #c7c7cc 94%);
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
 
     section {
@@ -2119,15 +2134,9 @@
       }
 
       .rating-row {
-        gap: 8px;
         margin-bottom: 18px;
         font-size: 0.92rem;
         line-height: 1.35;
-      }
-
-      .stars {
-        font-size: 1.55em;
-        letter-spacing: 0.04em;
       }
 
       .button {
@@ -5746,8 +5755,12 @@
     <header class="hero">
       <div class="shell">
         <div class="hero-content">
-          <div class="rating-row" aria-label="4.7 out of 5 from 6 U.S. App Store ratings, checked September 9, 2026">
-            <span><span class="rating-score">4.7 / 5</span> · 6 U.S. App Store ratings · Checked September 9, 2026</span>
+          <div class="rating-row">
+            <div class="rating-summary">
+              <span class="rating-score">4.7 out of 5</span>
+              <span class="stars" aria-hidden="true">★★★★★</span>
+            </div>
+            <small class="rating-date">Checked September 9, 2026</small>
           </div>
           <p class="hero-category">Life management app for goals, habits, tasks, and purpose.</p>
           <h1 class="hero-kicker">Your life is not a to-do list.</h1>
