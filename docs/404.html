@@ -123,5 +123,38 @@
       <a href="/support.html">Support</a>
     </nav>
   </footer>
+  <script>
+(function () {
+  document.addEventListener('click', function (event) {
+    var appStoreLink = event.target.closest('[data-app-store-cta]');
+    if (
+      appStoreLink &&
+      (
+        appStoreLink.dataset.contentSlug ||
+        appStoreLink.dataset.contentCluster ||
+        appStoreLink.dataset.searchIntent
+      ) &&
+      typeof window.gtag === 'function'
+    ) {
+      window.gtag('event', 'app_store_click', {
+        page_type: appStoreLink.dataset.pageType || '',
+        content_slug: appStoreLink.dataset.contentSlug || '',
+        content_cluster: appStoreLink.dataset.contentCluster || '',
+        target_keyword: appStoreLink.dataset.targetKeyword || '',
+        search_intent: appStoreLink.dataset.searchIntent || '',
+        competitor: appStoreLink.dataset.competitor || '',
+        cta_position: appStoreLink.dataset.ctaPosition || '',
+        article_slug: appStoreLink.dataset.contentSlug || '',
+        position_id: appStoreLink.dataset.positionId || '',
+        cta_placement: appStoreLink.dataset.ctaPosition || '',
+        destination: appStoreLink.dataset.destination || 'app_store',
+        transport_type: 'beacon',
+        event_timeout: 2000
+      });
+    }
+
+  });
+}());
+  </script>
 </body>
 </html>
